@@ -1,2 +1,3 @@
 # minedive
-distributed search engine
+a P2P privacy conscious distributed search engine
+

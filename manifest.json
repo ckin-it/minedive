@@ -1,0 +1,33 @@
+  {
+    "name": "minedive",
+    "version": "0.0.1",
+    "description": "Minedive is a privacy conscious P2P search engine",
+    "permissions": [
+      "activeTab", 
+      "tabs",
+      "idle",
+      "*://*.google.com/",      
+      "*://*.google.it/",
+      "storage",
+      "unlimitedStorage"
+    ],
+    "background": {
+      "scripts": ["vendor/nacl-util.min.js", "vendor/nacl-fast.min.js", "background.js"]    },
+    "browser_action": {
+      "default_popup": "popup.html",
+       "default_icon": {
+        "16": "images/minedive16.png",
+        "32": "images/minedive32.png",
+        "48": "images/minedive48.png",
+        "128": "images/minedive128.png"
+      }
+    },
+     "icons": {
+      "16": "images/minedive16.png",
+      "32": "images/minedive32.png",
+      "48": "images/minedive48.png",
+      "128": "images/minedive128.png"
+    },
+    "manifest_version": 2
+  }
+  
