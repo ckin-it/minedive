@@ -12,4 +12,4 @@
 - load unpacked extension from the repository folder
 
 ## Documentation
-More documentation about design and usage can be faund in the [Wiki](https://github.com/ckin-it/minedive/wiki)
+More documentation about design and usage can be found in the [Wiki](https://github.com/ckin-it/minedive/wiki)
