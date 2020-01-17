@@ -1,7 +1,9 @@
 # minedive
 
 ## Overview
-**minedive** is a P2P privacy conscious distributed search engine embedden in a browser extension. The source for **minedive-server** is located in its own repository.
+**minedive** is a P2P privacy conscious distributed search engine embedden in a browser extension. 
+
+The source for **minedive-server** is located in its own repository: [godive](https://github.com/ckin-it/godive)
 
 ## Installation
 **minedive** can be installed through the Chrome Web Store (coming soon), or from this repository using the following procedure:
