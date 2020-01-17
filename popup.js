@@ -9,6 +9,12 @@ document.getElementById('open').onclick = function(element) {
   browser.tabs.create({ url: newURL});
 }
 
+document.getElementById('options').onclick = function(element) {
+  var newURL = browser.runtime.getURL('/options.html');
+  browser.tabs.create({ url: newURL});
+}
+
+
 var port = browser.runtime.connect();
 
 port.onMessage.addListener(function(msg) {

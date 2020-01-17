@@ -4,7 +4,7 @@ let log = bkg.console.log;
 let q = '';
 let r = [];
 
-let port = browser.runtime.connect({name: "knockknock"});
+let port = browser.runtime.connect();
 
 browser.storage.onChanged.addListener(function(changes, namespace) {
   for (let key in changes) {
