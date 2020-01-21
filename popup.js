@@ -42,6 +42,6 @@ browser.storage.onChanged.addListener(function(changes, namespace) {
 function update_popup(s, _text)
 {
   var res = document.querySelector('div#'+s);
-  res.innerHTML = _text;
+  res.innerHTML = sanitizeHTML(_text);
 }
 

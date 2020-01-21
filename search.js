@@ -26,13 +26,24 @@ document.getElementById('search').onkeypress = function(e) {
 
 function show_results() {
   let res = document.querySelector('div#results');
-  let out = '';
-  res.innerHTML = out;
+  var ol = document.createElement('ol');
+  ol.textContent = 'searching for '+q;
+  var oldol = res.querySelector('ol');
   if(!r) return;
   r.forEach( function(e) {
-    out += '<a href=\"'+e+'\">'+ e + '</a></br>';
+    var li = document.createElement('li'); 
+    var a = document.createElement('a');
+    a.href = e;
+    a.textContent = e;
+    li.appendChild(a);
+    ol.appendChild(li);
   });
-  res.innerHTML = out;
+  if(oldol) {
+    res.insertBefore(ol, oldol);
+    log("oldol is present");
+  } else {
+    res.appendChild(ol);
+  }
 }
 
 function search_all() {

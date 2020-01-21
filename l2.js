@@ -118,30 +118,6 @@ function parseL2msg(l2, emsg) {
     }
     return;
   }
-  
-  function resp_google_search_l2(l2, q, l) {
-    let x = new XMLHttpRequest();
-    let url = 'http://www.google.com/search?q='+q+'&lr='+l+'&hl='+l;
-    x.onload = function () {
-      if(x.status == 200) {
-        log(x);
-        let r = extract_results(x.responseText);
-        log(r);
-        let msg = {
-          type: 'resp',
-          q: q,
-          text: r
-        };
-        sendL2JSON(l2, msg);
-      }
-    };
-    x.onerror = function(err) {
-      console.log('XMLHTTPRequest error');
-      console.log(err)
-    };
-    x.open('GET', url);
-    x.send()
-  }
 
   function handle_resp_l2(p, msg) {
     log('resp for '+msg.q+' from '+p.name);
@@ -206,11 +182,11 @@ function parseL2msg(l2, emsg) {
     }
   }
   
-  function send_peer_unreachable(peer, unreach) {
-    let msg = {
-      type: 'unreachable',
-      l2: unreach
-    };
-    peer.sendJSON(msg);
-  }
+function send_peer_unreachable(peer, unreach) {
+  let msg = {
+    type: 'unreachable',
+    l2: unreach
+  };
+  peer.sendJSON(msg);
+}
   

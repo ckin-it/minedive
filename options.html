@@ -1,0 +1,69 @@
+ <!DOCTYPE html>
+  <html>
+    <head>
+    <title>Minedive - options</title>
+      <style>
+        button {
+          height: 30px;
+          width: 250px;
+          outline: none;
+          background-color: #4885ed;
+          border: 1px;
+          margin: 3px;
+          color: white;
+          text-decoration: bold;
+          text-align: center;
+        }
+        button:disabled {
+          background-color: #eeeeee;
+        }
+        input {
+          margin: 3px;
+          width: 246px;
+        }
+        textarea {
+          margin: 3px;
+          width: 246px;
+        }
+        .b {
+          display: block;
+        }
+      </style>
+    </head>
+    <body>
+    <h2>Minedive options</h2>
+    <form>
+    <div>
+    Static ID
+    </div><div>
+    <input type="text" id="staticID">
+    </div><div>
+    Minimum number of L1 peers
+    </div><div>
+    <input type="text" id="minL1"> 
+    </div><div>
+    Minimum number of L2 peers
+    </div><div>
+    <input type="text" id="minL2"> 
+    </div><div>
+    STUN/TURN server 
+    </div><div>
+    <textarea rows=6 id="stun"></textarea>
+    </div><div>
+    Minedive server
+    </div><div>
+    <input type="text" id="ws_server"> 
+    </div><div>
+    Community string
+    </div><div>
+    <input type="text" id="community"> 
+    </div><div>
+    <button type="button" id="apply">Save & Apply</button>
+    </div><div>
+    <button type="button" id="restore">Restore defaults</button>
+    </div>
+    </form>
+    <script src="options.js"></script>
+    <script src="conf.js"></script>
+    </body>
+  </html>

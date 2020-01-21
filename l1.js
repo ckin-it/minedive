@@ -103,7 +103,7 @@ function handle_l1_msg(e) {
       }
       case 'search': {
         log(msg);
-        resp_google_search(p, msg.q);
+        //resp_google_search(p, msg.q);
         break;
       }
       case "l2": {

@@ -1,19 +1,3 @@
-function search_google(q) {
-    let x = new XMLHttpRequest();
-    let url = 'http://www.google.com/search?q=' +  q;
-    x.onload = function () {
-      if(x.status == 200) {
-        log(x);
-        log(extract_results(x.responseText));
-      }
-    };
-    x.onerror = function(err) {
-      console.log(err)
-    };
-    x.open('GET', url);
-    x.send()
-  }
-
 let avoid_domains = 
 ['webcache.googleusercontent.com',
  'translate.google.com'
@@ -38,48 +22,20 @@ function extract_results(t)
   return out;
 }
 
-function handle_resp(p, msg) {
-  log('resp for '+msg.q+' from '+p.name);
-  let r = msg.text;
-  chrome.storage.local.get(['q_'+msg.q], function(result) {
-    log('here');
-    let a = result[msg.q];
-    let c = 0;
-    if(result[msg.q]) {
-      for(let i = 0; i < r.length; i++) {
-        log(r[i]);
-        if(!a.includes(r[i])) {
-          log('new result');
-          a.push(r[i]);
-          c = 1;
-        }
-      }
-    } else {
-      log('new key');
-      a = r;
-      c = 1;
-    }
-    if(c) {
-      log('update key '+msg.q);
-      chrome.storage.local.set({['q_'+msg.q]: a}, function () {log('key updated');});
-    }
-  });
-}
-
-function resp_google_search(p, q, l) {
+function resp_google_search_l2(l2, q, l) {
     let x = new XMLHttpRequest();
     let url = 'http://www.google.com/search?q='+q+'&lr='+l+'&hl='+l;
+    log(url)
     x.onload = function () {
       if(x.status == 200) {
         log(x);
         let r = extract_results(x.responseText);
         let msg = {
-          from: myUsername,
           type: 'resp',
           q: q,
           text: r
         };
-        p.dc.send(JSON.stringify(msg));
+        sendL2JSON(l2, msg);
       }
     };
     x.onerror = function(err) {
@@ -89,4 +45,3 @@ function resp_google_search(p, q, l) {
     x.open('GET', url);
     x.send()
   }
-  
