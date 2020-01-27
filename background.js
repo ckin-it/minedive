@@ -105,3 +105,4 @@ chrome.storage.local.get(['options'], function(result) {
 
 setInterval(get_peers_if_needed, 10000);
 setInterval(lazy_ping, 10000);
+setInterval(ws_ping, 10000);

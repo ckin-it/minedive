@@ -66,7 +66,17 @@ function get_all_keys() {
     };
     connection.send(JSON.stringify(msg));
   }
-  
+
+function ws_ping() {
+  var d = new Date();
+  var n = d.getTime();
+  let msg = {
+    type: "ping",
+    data: n
+  };
+  connection.send(JSON.stringify(msg));
+}
+
 //ws server messages
 function ws_connect() {
     connection = new WebSocket(options.ws_server, "json");
@@ -159,6 +169,10 @@ function ws_connect() {
         }
         case "message": {
           console.log('from '+msg.name+': '+msg.text);
+          break;
+        }
+        case "pong": {
+          console.log("pong");
           break;
         }
         case "rejectusername": {
