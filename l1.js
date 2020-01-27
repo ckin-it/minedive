@@ -128,7 +128,7 @@ function handle_l1_msg(e) {
         break;
       }
       case 'resp': {
-        handle_resp(p, msg);
+        log(msg);
         break;
       }
       case 'ping': {

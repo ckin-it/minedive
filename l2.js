@@ -127,8 +127,6 @@ function parseL2msg(l2, emsg) {
       let a = result['q_'+msg.q];
       let c = 0;
       if(a) {
-        log(r.length);
-        log(r.lenght);
         for(let i = 0; i < r.length; i++) {
           if(!a.includes(r[i])) {
             a.push(r[i]);
