@@ -43,13 +43,9 @@ chrome.runtime.onConnect.addListener(function(port) {
   port.onMessage.addListener( function(msg) {
     switch(msg.type) {
       case 'status':
-        //XXX sending just peers number, enabling search or not
-        let peers_number = '';
         let peers_number_l1 = Object.keys(l1_peers).length;
         let peers_number_l2 = Object.keys(l2_peers).length;
-        peers_number  = 'L1 peers: '+Object.keys(l1_peers).length+'</br>';
-        peers_number += 'L2 peers: '+Object.keys(l2_peers).length+'</br>';
-        port.postMessage({type: "status", text: '', l1: peers_number_l1, l2: peers_number_l2});
+        port.postMessage({type: "status", text: status_log, l1: peers_number_l1, l2: peers_number_l2});
         break;
       case 'get_options':
         console.log('get_options received');
