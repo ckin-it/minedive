@@ -4,11 +4,11 @@ let avoid_domains =
  ];
 let accept_protocols = ['http:', 'https:']
 
-function extract_results(t)
+function extract_results(_t)
 {
   let out = [];
   let c = document.implementation.createHTMLDocument().documentElement;
-  c.innerHTML = t;
+  c.innerHTML = _t;
   let as = c.querySelector("div.srg").querySelectorAll('a');
   for(let i = 0; i < as.length; i++)
   {
