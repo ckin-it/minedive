@@ -20,6 +20,8 @@ var port = browser.runtime.connect();
 port.onMessage.addListener(function(msg) {
   switch(msg.type) {
     case 'status':
+      log('status')
+      log(msg)
       update_popup('status', msg.text, msg.l1, msg.l2);
       break;
   }
@@ -43,10 +45,10 @@ function update_popup(s, _text, _l1, _l2)
 {
   var res = document.querySelector('div#'+s);
   let status  = '';
-  if(_text) status += sanitazeHTML(_text);
-  if(_l1) status += '</br>L1 peers: '+sanitizeHTML(_l1);
+  if(_text) status += sanitizeHTML(_text);
+  if(_l1) status += '\r\nL1 peers: '+sanitizeHTML(_l1);
   if(_l2) {
-    status += '</br>L2 peers: '+sanitizeHTML(_l2);
+    status += '\r\nL2 peers: '+sanitizeHTML(_l2);
     if(_l2 > 0) document.getElementById('search').disabled = false;
     else document.getElementById('search').disabled = true;
   } 
