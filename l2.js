@@ -113,7 +113,11 @@ function parseL2msg(l2, emsg) {
     for(k in l1_peers) {
       if(l1_peers.hasOwnProperty(k)) {
         let l = l1_peers[k];
-        if(l.dc.readyState == 'open') ask_l2(l.name);
+        if(l.dc) {
+          if(l.dc.readyState == 'open') ask_l2(l.name);
+        } else {
+          log(l.name + "has no dc, has pc?" + l.pc);
+        }
       }
     }
     return;
@@ -121,6 +125,7 @@ function parseL2msg(l2, emsg) {
 
   function handle_resp_l2(p, msg) {
     log('resp for '+msg.q+' from '+p.name);
+    status_log = 'connected\r\n';
     let r = msg.text;
     chrome.storage.local.get(['q_'+msg.q], function(result) {
       log('here storage.local.get');
@@ -172,7 +177,9 @@ function parseL2msg(l2, emsg) {
     switch(m.type) {
       case 'search':
         log(m);
-        resp_google_search_l2(l2, m.q);
+        let q = encodeURIComponent(m.q);
+        let l = encodeURIComponent(m.l);
+        resp_google_search_l2(l2, q, l);
         break;
       case 'resp':
         handle_resp_l2(l2, m);
