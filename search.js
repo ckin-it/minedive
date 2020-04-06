@@ -24,6 +24,17 @@ document.getElementById('search').onkeypress = function(e) {
   }
 }
 
+function is_accepted_result(str) {
+  var proto = str.substr(0, str.indexOf(':'));
+  switch (proto) {
+    case "http":
+    case "https":
+      return true;
+    default:
+      return false;
+  }
+}
+
 function show_results() {
   let res = document.querySelector('div#results');
   var ol = document.createElement('ol');
@@ -33,10 +44,12 @@ function show_results() {
   r.forEach( function(e) {
     var li = document.createElement('li'); 
     var a = document.createElement('a');
-    a.href = e;
-    a.textContent = e;
-    li.appendChild(a);
-    ol.appendChild(li);
+    if(is_accepted_result(e)) {
+      a.href = e;
+      a.textContent = e;
+      li.appendChild(a);
+      ol.appendChild(li);
+    }
   });
   if(oldol) {
     res.insertBefore(ol, oldol);
