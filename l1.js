@@ -148,9 +148,11 @@ async function create_all_offers() {
 function handle_l1_msg(e) {
     let from = e.currentTarget.label;
     let msg = JSON.parse(e.data);
-    if(msg.from == from) var p = get_peer_by_name(from);
-    else {log('peer '+from+' trying to spoof '+msg.from+' msg ignored');}
-    let p = get_peer_by_name(msg.from);
+    if(msg.from != from) {
+      log('peer '+from+' trying to spoof '+msg.from+' msg ignored');
+      return;
+    }
+    let p = get_peer_by_name(from);
     if(!p) return null;
     switch(msg.type) {
       case 'unreachable': {
