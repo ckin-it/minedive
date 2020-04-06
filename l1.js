@@ -3,26 +3,50 @@ let channelID = 0; //XXX used somewhere?
 function lazy_ping() {
   for(let i in l1_peers) {
     let p = l1_peers[i];
-    if(p.dc.readyState == 'open') {
-      let data = Date.now();
-      p.sendJSON({from: myUsername, type: 'ping', text: data});
-      p.ping_timeout = setTimeout(function(){
-        log('ping timeout');
-        delete_l1_peer(p);
-      }, 10000);
+    if(p.dc) {
+      if(p.dc.readyState == 'open') {
+        let data = Date.now();
+        p.sendJSON({from: myUsername, type: 'ping', text: data});
+        p.ping_timeout = setTimeout(function(){
+          log('ping timeout');
+          delete_l1_peer(p);
+        }, 10000);
+      }
+    } else {
+      log(p.name+' has no DC yet');
     }
   }
 }
 
-function create_peer(name, alias) {
-  let o = {};
-  o.name = name;
-  o.alias = alias;
-  o.pc = new RTCPeerConnection({iceServers: options.stun});
-  o.dc = o.pc.createDataChannel(name, {negotiated: true, id: 0});
-  channelID++;
+function add_dc_handler(p) {
+  p.pc.ondatachannel = e => {
+    p.dc = e.channel;
+    p.timeout = setTimeout(function(){
+      log(p.name+' connection timeout');
+      delete_l1_peer(p);
+    }, 300000);
+
+    p.dc.onopen = () => {
+      log("opening data channel")
+      if(p.dc.readyState != 'open') {
+        log(p.name+' not open yet ('+p.dc.readyState+')');
+        return;
+      }
+      clearTimeout(p.timeout);
+      p.sendJSON = (e) => p.dc.send(JSON.stringify(e));
+      let ping_text = Date.now();
+      p.sendJSON({from: myUsername, type:'ping', text:ping_text});
+    }
+    p.dc.onmessage = m => handle_l1_msg(m);
+    p.dc.onclose = () => log(p.name+' closed');
+  }
+}
+
+function create_dc(o) {
+  o.dc = o.pc.createDataChannel(myUsername+o.name); //XXX non nego
   o.dc.onopen = () => {
-    if(o.dc.readyState != 'open') { 
+    log("opening data channel")
+    if(o.dc.readyState != 'open') {
       log(o.name+' not open yet ('+o.dc.readyState+')');
       return;
     }
@@ -31,6 +55,61 @@ function create_peer(name, alias) {
     let ping_text = Date.now();
     o.sendJSON({from: myUsername, type:'ping', text:ping_text});
   }
+  o.dc.onmessage = m => handle_l1_msg(m);
+  o.dc.onclose = () => log(o.name+' closed');
+  log('dc '+o.name+' created');
+  o.timeout = setTimeout(function(){
+    log(o.name+' connection timeout');
+    delete_l1_peer(o);
+  }, 300000);
+}
+
+function create_peer(name, alias) {
+  let o = {};
+  o.name = name;
+  o.alias = alias;
+  o.pc = new RTCPeerConnection({iceServers: options.stun});
+  channelID++;
+  o.pc.oniceconnectionstatechange = e => {
+    log('ICE '+o.name +' is '+o.pc.iceConnectionState);
+  }
+  o.pc.onconnectionstatechange = e => {
+    log(o.name +' is '+o.pc.connectionState);
+    if(o.pc.connectionState == 'failed' || o.pc.connectionState == 'disconnected') {
+      delete_l1_peer(o);
+    }
+  }
+  o.pc.oniceconnectionstatechange = e => {
+    log(o.name +' ICE is '+o.pc.iceConnectionState);
+  }
+  o.pc.onicecandidate = ice => {
+    log('OnICECandidate '+ice.candidate);
+  }
+  log('peer '+o.name+' created');
+  return o;
+}
+
+function create_peer_with_datachannel(name, alias) {
+  let o = {};
+  o.name = name;
+  o.alias = alias;
+  o.pc = new RTCPeerConnection({iceServers: options.stun});
+  o.dc = o.pc.createDataChannel(name, {negotiated: true, id: 0});
+  //o.dc = o.pc.createDataChannel(name, {negotiated: true, protocol: "string", id: 0});
+  //o.dc = o.pc.createDataChannel(name, {negotiated: true, id: 0, maxRetransmits: 30});
+  //o.dc = o.pc.createDataChannel(name, {maxRetransmits: 3});
+  channelID++;
+  o.dc.onopen = () => {
+    log("opening data channel")
+    if(o.dc.readyState != 'open') { 
+      log(o.name+' not open yet ('+o.dc.readyState+')');
+      return;
+    }
+    clearTimeout(o.timeout);
+    let ping_text = Date.now();
+    o.sendJSON({from: myUsername, type:'ping', text:ping_text});
+  }
+  o.sendJSON = (e) => o.dc.send(JSON.stringify(e));
   o.dc.onmessage = m => handle_l1_msg(m);
   o.dc.onclose = () => log(o.name+' closed');
   o.pc.oniceconnectionstatechange = e => {
@@ -50,7 +129,7 @@ function create_peer(name, alias) {
   }
   log('peer '+o.name+' created');
   o.timeout = setTimeout(function(){
-    log('connection timeout'); 
+    log(o.name+' connection timeout');
     delete_l1_peer(o);
   }, 300000);
   return o;
@@ -71,12 +150,15 @@ function handle_l1_msg(e) {
     let msg = JSON.parse(e.data);
     if(msg.from == from) var p = get_peer_by_name(from);
     else {log('peer '+from+' trying to spoof '+msg.from+' msg ignored');}
+    let p = get_peer_by_name(msg.from);
     if(!p) return null;
-    //log(msg);
     switch(msg.type) {
       case 'unreachable': {
-        log(msg.l2+' unreachable');
-        delete l2_peers[msg.l2];
+        log(msg.l2+' unreachable from '+msg.from);
+        //XXX in JS is it better to compare strings or objects?
+        if (l2_peers[msg.l2].gw.name == p.name) {
+          delete l2_peers[msg.l2];
+        }
         break;
       }
       case 'fwd': {
@@ -138,7 +220,8 @@ function handle_l1_msg(e) {
           type: 'pong',
           text: ping_text,
         }
-        p.sendJSON(rep);
+        if(p.sendJSON) p.sendJSON(rep);
+        else {log(p.name + "has not yet sendJSON but receive msgs")}
         break;
       }
       case 'pong': {
@@ -154,10 +237,10 @@ function handle_l1_msg(e) {
 
   function delete_l1_peer(o) {
     delete l1_peers[o.name];
-    o.dc.close();
+    if(o.dc) o.dc.close();
     o.pc.close();
     log(o.name+' L1 peer lost'); //XXX send to status
-    status_log += o.name+' disconnected.<br/>';
+    status_log += o.name+' disconnected.\r\n';
     let l2lost = 0;
     for(k in l2_peers) {
       let l = l2_peers[k];
@@ -166,6 +249,6 @@ function handle_l1_msg(e) {
         l2lost++;
       }
     }
-    if(l2lost) status_log += l2lost+' L2 peers lost.<br/>';
+    if(l2lost) status_log += l2lost+' L2 peers lost.\r\n';
   }
   

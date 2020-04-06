@@ -49,7 +49,8 @@ function get_all_keys() {
       pk: str_publicKey,
       date: Date.now(),
       id: clientID,
-      type: "username"
+      type: "username",
+      ext: "ext"
     };
     myUsername = msg.name;
     log('my username is: '+myUsername);
@@ -92,10 +93,12 @@ function ws_connect() {
     };
   
     connection.onmessage = function(evt) {
+      status_log = 'Connected to WS server\r\n';
       let text = "";
       let msg = JSON.parse(evt.data);
       let time = new Date(msg.date);
       let timeStr = time.toLocaleTimeString();
+      log(msg.type)
   
       switch(msg.type) {
         case "id": {
@@ -128,7 +131,7 @@ function ws_connect() {
               }
             }
             l2.state = 'ok';
-            status_log += 'L2 available<br/>';
+            status_log = 'L2 connected\r\n';
             baSetGreen(' ');
             log(l2_peers[msg.alias]);
           }
@@ -151,11 +154,16 @@ function ws_connect() {
           if(!p) {
             if(!msg.alias) log('missing alias to peer '+msg.name);
             let p = create_peer(msg.name, '');
+            add_dc_handler(p);
             p.from_signaling = false;
             l1_peers[p.name] = p;
             ws_get_alias(p.name);
+            status_log += 'L1 offer from '+msg.name+'\r\n';
           }
-          accept_offer(p.pc, p.name, msg.sdp);
+          if(p.pc) accept_offer(p.pc, p.name, msg.sdp);
+          else {
+            log("XXX"+p.name +" has no " +p.pc);
+          }
           break;
         }
         case "answer": {
@@ -164,19 +172,19 @@ function ws_connect() {
           let p = get_peer_by_name(msg.name);
           log(p);
           log('answer from '+p.name);
+          status_log += 'L1 answer received from '+msg.name+'\r\n';
           accept_answer(p.pc, msg.sdp);
           break;
         }
         case "message": {
-          console.log('from '+msg.name+': '+msg.text);
+          log('from '+msg.name+': '+msg.text);
           break;
         }
         case "pong": {
-          console.log("pong");
           break;
         }
         case "rejectusername": {
-          console.log("(other name in use) username: "+msg.name);
+          log("(other name in use) username: "+msg.name);
           break;
         }
         case "userlist": {
@@ -192,7 +200,14 @@ function ws_connect() {
                 l1_peers[p.name] = p;
                 log(p.alias);
                 alias_to_peers[p.alias] = p.name;
-                if(msg.contact) create_offer(p.pc, p.name);
+                if(msg.contact == 1) {
+                  create_dc(p);
+                  create_offer(p.pc, p.name);
+                } else {
+                  add_dc_handler(p);
+                }
+              } else {
+                //XXX handle not connected case
               }
             }
           }
@@ -201,7 +216,7 @@ function ws_connect() {
       }
   
       if (text.length) {
-        console.log(text);
+        log(text);
       }
     };
   }
