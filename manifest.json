@@ -1,6 +1,6 @@
 {
   "name": "minedive",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Minedive is a privacy conscious P2P search engine",
   "permissions": [
     "idle",
