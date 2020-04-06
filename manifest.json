@@ -1,10 +1,8 @@
 {
   "name": "minedive",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Minedive is a privacy conscious P2P search engine",
   "permissions": [
-    "activeTab",
-    "tabs",
     "idle",
     "*://*.google.com/",
     "*://*.google.it/",
