@@ -13,21 +13,28 @@ let alias_to_peers = {};
 
 let status_log = '';
 
-const keyPair = nacl.box.keyPair();
-const publicKey = keyPair.publicKey;
-const secretKey = keyPair.secretKey;
-const str_publicKey = nacl.util.encodeBase64(publicKey);
+const kp = nacl.box.keyPair();
+//kp.secretKey and kp.publicKey
 
-let myUsername = null;
+let TID = null;
+let TKID = null;
 let connection = null;
 
-
-function get_peers_if_needed(){
-  let needed = 0;
+function get_peers_l1_if_needed(){
+  let needed = 2;
   if(Object.keys(l1_peers).length < options.minL1)  {
     needed++;
     ws_get_peers();
   }
+  if(needed) {
+    baSetYellow(' ');
+  } else {
+    baSetGreen(' ');
+  }
+}
+
+function get_peers_l2_if_needed(){
+  let needed = 2;
   if(Object.keys(l2_peers).length < options.minL2) {
     needed++;
     ask_l2_all();
@@ -62,9 +69,11 @@ chrome.runtime.onConnect.addListener(function(port) {
         apply_options();
         break;
       case 'search':
+        log("search", msg.q);
         //XXX currently sending search to all L2 peers
         for(k in l2_peers) {
           let p = l2_peers[k];
+          log(p.gw.dc.readyState);
           if(p.gw.dc.readyState == 'open')
           {
             let lang = navigator.language || navigator.userLanguage;
@@ -82,6 +91,25 @@ chrome.runtime.onConnect.addListener(function(port) {
     }
   });
 });
+
+function searchL2(value){
+  for(k in l2_peers) {
+    let p = l2_peers[k];
+    if(p.gw.dc.readyState == 'open')
+    {
+      let lang = navigator.language || navigator.userLanguage;
+      let m = {
+        type: 'search',
+        l: lang,
+        q: value,
+      };
+      sendL2JSON(p, m);
+    } else {
+      log("p.gw.dc.readyState:", p.gw.dc.readyState);
+    }
+    //port.postMessage({type: "search_status", data: XXX});
+  }
+}
 
 function reconnect() {
   log('reconnecting...');
@@ -101,6 +129,10 @@ chrome.storage.local.get(['options'], function(result) {
   ws_connect();
 });
 
-setInterval(get_peers_if_needed, 10000);
-setInterval(lazy_ping, 10000);
-//setInterval(ws_ping, 10000);
+function main() {
+  setInterval(get_peers_l1_if_needed, 10000);
+  setInterval(get_peers_l2_if_needed, 10000);
+  //setInterval(lazy_ping, 10000);
+  setInterval(ws_ping, 10000);
+}
+main();

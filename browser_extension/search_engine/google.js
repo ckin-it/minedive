@@ -9,15 +9,17 @@ function extract_results(_t)
   let out = [];
   let c = document.implementation.createHTMLDocument().documentElement;
   c.innerHTML = _t;
-  let as = c.querySelector("div.srg").querySelectorAll('a');
+  log(_t);
+  let as = c.querySelector("div#res").querySelectorAll('a');
   for(let i = 0; i < as.length; i++)
   {
     let a = as[i];
-    let url = new URL(a.href);
-    if(accept_protocols.includes(url.protocol) && 
-       !avoid_domains.includes(url.host)) {
-      if(!out.includes(a.href)) out.push(a.href);
-    }
+    let url
+    try { url = new URL(a.href); 
+      if(accept_protocols.includes(url.protocol) && !avoid_domains.includes(url.host)) {
+        if(!out.includes(a.href)) out.push(a.href);
+      }
+    } catch(error){log(a.href, error);}
   }
   return out;
 }
@@ -28,13 +30,13 @@ function resp_google_search_l2(l2, q, l) {
     log(url)
     x.onload = function () {
       if(x.status == 200) {
-        log(x);
         let r = extract_results(x.responseText);
         let msg = {
           type: 'resp',
           q: q,
           text: r
         };
+        log("sending...")
         sendL2JSON(l2, msg);
       }
     };

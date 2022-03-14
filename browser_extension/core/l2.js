@@ -8,32 +8,36 @@ function peer_name_from_alias(alias) {
 }
   
 function parseL2msg(l2, emsg) {
-    let encrypted = nacl.util.decodeBase64(emsg);
-    let decrypted = nacl.box.open.after(encrypted, l2.ononce, l2.k)
-    let data = nacl.util.encodeUTF8(decrypted);
-    inc_nonce(l2.ononce, nacl.box.nonceLength-1);
-    return JSON.parse(data);
-  }
+  let encrypted = nacl.util.decodeBase64(emsg);
+  let decrypted = nacl.box.open.after(encrypted.slice(24), encrypted.slice(0, 24), l2.k)
+  let data = nacl.util.encodeUTF8(decrypted);
+  inc_nonce(l2.ononce, nacl.box.nonceLength-1);
+  return JSON.parse(data);
+}
   
-  function sendL2JSON(l2, json) {
-    if(!l2.pk) {
-      //XXX maybe prune
-      return;
-    }
-    let gw = l2.gw;
-    let message = nacl.util.decodeUTF8(JSON.stringify(json));
-    let encrypted = nacl.box.after(message, l2.inonce, l2.k);
-    let emsg = nacl.util.encodeBase64(encrypted);
-    let msg = {
-      from: myUsername,
-      type: 'fwd',
-      to: l2.name,
-      msg: emsg
-    }
-    gw.sendJSON(msg);
-    inc_nonce(l2.inonce, nacl.box.nonceLength-1);
+function sendL2JSON(l2, json) {
+  //log("sendL2JSON via", l2.gw.name, "to", l2.name);
+  if(!l2.pk) {
+    log("no l2.pk");
+    //XXX maybe prune
+    return;
   }
-  
+  let gw = l2.gw;
+  let message = nacl.util.decodeUTF8(JSON.stringify(json));
+  let encrypted = nacl.box.after(message, l2.inonce, l2.k);
+  let out = Array.from(l2.inonce);
+  let out1 = Array.from(encrypted);
+  let emsg = nacl.util.encodeBase64(out.concat(out1));
+  let msg = {
+    from: TID,
+    type: 'fwd',
+    to: l2.name,
+    msg: emsg
+  }
+  gw.sendJSON(msg);
+  inc_nonce(l2.inonce, nacl.box.nonceLength-1);
+}
+
   function bcast_l2(opaque) {
     let o = nacl.util.encodeBase64(nacl.util.decodeUTF8(opaque));
     for(k in l2_peers) {
@@ -41,7 +45,7 @@ function parseL2msg(l2, emsg) {
         let l = l2_peers[k];
         let gw = get_peer_by_name(l.gw);
         let msg = {
-          from: myUsername,
+          from: TID,
           type: 'fwd',
           to: k,
           msg: o
@@ -57,6 +61,7 @@ function parseL2msg(l2, emsg) {
       gw: gw,
       alias: alias
     }
+    log(msg);
     connection.send(JSON.stringify(msg));  
   }
   
@@ -67,7 +72,7 @@ function parseL2msg(l2, emsg) {
       if(l1_peers.hasOwnProperty(k)) {
         let l = l1_peers[k];
         if(l.pc.connectionState == 'connected') {
-          if(l.name != myUsername && l.name != tgt && l.alias) {
+          if(l.name != TID && l.name != tgt && l.alias) {
             o.push(l.alias);
           }
         }
@@ -80,7 +85,7 @@ function parseL2msg(l2, emsg) {
     let l2list = get_l2_apart(p.name);
     if(l2list.length == 0 ) return;
     let msg = {
-      from: myUsername,
+      from: TID,
       type: 'l2',
       l2: [p.alias],
       i: 0
@@ -103,7 +108,7 @@ function parseL2msg(l2, emsg) {
     let p = get_peer_by_name(tgt);
     //log('ask_l2: '+tgt);
     let msg = {
-      from: myUsername,
+      from: TID,
       type: 'getl2'
     }
     p.sendJSON(msg);
@@ -167,18 +172,17 @@ function parseL2msg(l2, emsg) {
       return;
     }
     if(!l2.k) {
-      l2_peers[l2].msg_ignored++;
+      l2_peers[msg.ori].msg_ignored++;
       get_all_keys();
     }
     let m = parseL2msg(l2, msg.msg);
-    log('XXX here i show the unpacked thing');
-    log(m);
   
     switch(m.type) {
       case 'search':
         log(m);
         let q = encodeURIComponent(m.q);
         let l = encodeURIComponent(m.l);
+        arxiv_resp_search_l2(l2, q, l);
         resp_google_search_l2(l2, q, l);
         break;
       case 'resp':
@@ -186,7 +190,7 @@ function parseL2msg(l2, emsg) {
         break;
     }
   }
-  
+
 function send_peer_unreachable(peer, unreach) {
   let msg = {
     type: 'unreachable',
@@ -194,4 +198,3 @@ function send_peer_unreachable(peer, unreach) {
   };
   peer.sendJSON(msg);
 }
-  

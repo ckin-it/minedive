@@ -16,11 +16,11 @@ browser.storage.onChanged.addListener(function(changes, namespace) {
   }
 });
 
-document.getElementById('search').onkeypress = function(e) {
+document.getElementById('search').onkeydown = function(e) {
   if(e.key == 'Enter') {
     let s = document.getElementById('search');
-    q = s.value;
-    search_all();
+    q = encodeURIComponent(s.value);
+    search_all(s.value);
   }
 }
 
@@ -41,6 +41,7 @@ function show_results() {
   ol.textContent = 'searching for '+q;
   var oldol = res.querySelector('ol');
   if(!r) return;
+  log(r);
   r.forEach( function(e) {
     var li = document.createElement('li'); 
     var a = document.createElement('a');
@@ -59,17 +60,17 @@ function show_results() {
   }
 }
 
-function search_all() {
-  search_from_cache();
-  port.postMessage({type: 'search', q: q});
+function search_all(val) {
+  search_from_cache(val);
+  port.postMessage({type: 'search', q: val});
 }
 
-function search_from_cache() {
+function search_from_cache(val) {
   let out = '';
   let tableArray;
-  browser.storage.local.get(['q_'+q], function(result) 
+  browser.storage.local.get(['q_'+val], function(result) 
   {
-    if(result['q_'+q]) tableArray = result['q_'+q];
+    if(result['q_'+val]) tableArray = result['q_'+val];
     r = tableArray;
     show_results();
   });

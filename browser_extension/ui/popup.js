@@ -5,12 +5,14 @@ let q = '';
 document.r = [];
 
 document.getElementById('search').onclick = function(element) {
-  var newURL = browser.runtime.getURL('/search.html');
+  var newURL = browser.runtime.getURL('/ui/search.html');
+  log(newURL);
   browser.tabs.create({ url: newURL});
 }
 
 document.getElementById('options').onclick = function(element) {
-  var newURL = browser.runtime.getURL('/options.html');
+  var newURL = browser.runtime.getURL('/ui/options.html');
+  log(newURL);
   browser.tabs.create({ url: newURL});
 }
 

@@ -6,7 +6,7 @@ function lazy_ping() {
     if(p.dc) {
       if(p.dc.readyState == 'open') {
         let data = Date.now();
-        p.sendJSON({from: myUsername, type: 'ping', text: data});
+        p.sendJSON({from: TID, type: 'ping', text: data});
         p.ping_timeout = setTimeout(function(){
           log('ping timeout');
           delete_l1_peer(p);
@@ -20,6 +20,7 @@ function lazy_ping() {
 
 function add_dc_handler(p) {
   p.pc.ondatachannel = e => {
+    //log("on data channel!");
     p.dc = e.channel;
     p.timeout = setTimeout(function(){
       log(p.name+' connection timeout');
@@ -27,7 +28,7 @@ function add_dc_handler(p) {
     }, 300000);
 
     p.dc.onopen = () => {
-      log("opening data channel")
+      //log("opening data channel")
       if(p.dc.readyState != 'open') {
         log(p.name+' not open yet ('+p.dc.readyState+')');
         return;
@@ -35,7 +36,7 @@ function add_dc_handler(p) {
       clearTimeout(p.timeout);
       p.sendJSON = (e) => p.dc.send(JSON.stringify(e));
       let ping_text = Date.now();
-      p.sendJSON({from: myUsername, type:'ping', text:ping_text});
+      p.sendJSON({from: TID, type:'ping', text:ping_text});
     }
     p.dc.onmessage = m => handle_l1_msg(m);
     p.dc.onclose = () => log(p.name+' closed');
@@ -43,9 +44,9 @@ function add_dc_handler(p) {
 }
 
 function create_dc(o) {
-  o.dc = o.pc.createDataChannel(myUsername+o.name); //XXX non nego
+  o.dc = o.pc.createDataChannel(TID+o.name); //XXX non nego
   o.dc.onopen = () => {
-    log("opening data channel")
+    //log("opening data channel")
     if(o.dc.readyState != 'open') {
       log(o.name+' not open yet ('+o.dc.readyState+')');
       return;
@@ -53,7 +54,7 @@ function create_dc(o) {
     clearTimeout(o.timeout);
     o.sendJSON = (e) => o.dc.send(JSON.stringify(e));
     let ping_text = Date.now();
-    o.sendJSON({from: myUsername, type:'ping', text:ping_text});
+    o.sendJSON({from: TID, type:'ping', text:ping_text});
   }
   o.dc.onmessage = m => handle_l1_msg(m);
   o.dc.onclose = () => log(o.name+' closed');
@@ -71,21 +72,18 @@ function create_peer(name, alias) {
   o.pc = new RTCPeerConnection({iceServers: options.stun});
   channelID++;
   o.pc.oniceconnectionstatechange = e => {
-    log('ICE '+o.name +' is '+o.pc.iceConnectionState);
+    //log('ICE cs change', o.name, 'is', o.pc.iceConnectionState);
   }
   o.pc.onconnectionstatechange = e => {
-    log(o.name +' is '+o.pc.connectionState);
+    //log(o.name +' is '+o.pc.connectionState);
     if(o.pc.connectionState == 'failed' || o.pc.connectionState == 'disconnected') {
       delete_l1_peer(o);
     }
   }
-  o.pc.oniceconnectionstatechange = e => {
-    log(o.name +' ICE is '+o.pc.iceConnectionState);
-  }
   o.pc.onicecandidate = ice => {
-    log('OnICECandidate '+ice.candidate);
+    //log('OnICECandidate '+ice.candidate);
   }
-  log('peer '+o.name+' created');
+  //log('peer '+o.name+' created');
   return o;
 }
 
@@ -107,7 +105,7 @@ function create_peer_with_datachannel(name, alias) {
     }
     clearTimeout(o.timeout);
     let ping_text = Date.now();
-    o.sendJSON({from: myUsername, type:'ping', text:ping_text});
+    o.sendJSON({from: TID, type:'ping', text:ping_text});
   }
   o.sendJSON = (e) => o.dc.send(JSON.stringify(e));
   o.dc.onmessage = m => handle_l1_msg(m);
@@ -146,13 +144,20 @@ async function create_all_offers() {
 }
   
 function handle_l1_msg(e) {
-    let from = e.currentTarget.label;
-    let msg = JSON.parse(e.data);
-    if(msg.from != from) {
-      log('peer '+from+' trying to spoof '+msg.from+' msg ignored');
-      return;
-    }
-    let p = get_peer_by_name(from);
+  //log(e);
+  let from = e.currentTarget.label; //XXX has this label to be the same across everything?
+  if(e.data == "XXX") {
+    log("XXX test received");
+    return;
+  }
+  //log(e.data);
+  let msg = JSON.parse(e.data);
+    //log(msg);
+    //if(msg.from != from) {
+    // log('peer '+from+' trying to spoof '+msg.from+' msg ignored');
+    //  return;
+    //}
+    let p = get_peer_by_name(msg.from); //XXX used to be from, but from is label
     if(!p) return null;
     switch(msg.type) {
       case 'unreachable': {
@@ -164,7 +169,8 @@ function handle_l1_msg(e) {
         break;
       }
       case 'fwd': {
-        if(msg.to == myUsername) {handle_l2_msg(msg, p); return;}
+        log("fwd message...");
+        if(msg.to == TID) {log("handle locally"); handle_l2_msg(msg, p); return;}
         log('XXX here i fwd this');
         log(msg);
         let dest_name = alias_to_peers[msg.to];
@@ -179,7 +185,7 @@ function handle_l1_msg(e) {
           send_peer_unreachable(p, msg.to); 
           return;
         }
-        msg.from = myUsername;
+        msg.from = TID;
         msg.ori = p.alias;
         msg.to = dest_name;
         dest_peer.sendJSON(msg);
@@ -191,19 +197,26 @@ function handle_l1_msg(e) {
         break;
       }
       case "l2": {
-        log(msg);
+        //log(msg);
         let state = 'new';
-        if(msg.l2.i) state = 'initiator';
+        if(msg.i) state = 'initiator';
         for(l in msg.l2) {
+          //log("L2 MSG received:", msg.l2[l], "gw:", p.name);
+          //log("L2 L received:", l, "gw:", p.name);
           l2_peers[msg.l2[l]] = {
             name: msg.l2[l], 
-            pubk:'', 
+            pk:'',
             gw:p, 
             state: state, 
             msg_ignored: 0
           };
         }
         get_all_keys();
+        break;
+      }
+      case "extend": {
+        log(msg);
+        send_l2(p);
         break;
       }
       case "getl2": {
@@ -218,7 +231,7 @@ function handle_l1_msg(e) {
       case 'ping': {
         let ping_text = msg.text;
         let rep = {
-          from: myUsername,
+          from: TID,
           type: 'pong',
           text: ping_text,
         }
@@ -233,6 +246,9 @@ function handle_l1_msg(e) {
         //log('roundtrip '+p.name+': '+latency);
         if(p.ping_timeout) clearTimeout(p.ping_timeout);
         break;
+      }
+      default: {
+        log(msg.type, "not implemented")
       }
     }
   }
