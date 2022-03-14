@@ -6,7 +6,7 @@ a browser extension.
 
 The source for **minedive-server** isn't located no more in its own repository:
 [godive](https://github.com/ckin-it/godive) but it's available in this repo 
-in [mined](https://github/ckin-it/minedive/minedive/cmd/mined/)
+in [mined](https://github.com/ckin-it/minedive/minedive/cmd/mined/)
 
 ## Installation
 **minedive** can be installed through the Chrome Web Store (coming soon), or 
