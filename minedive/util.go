@@ -14,5 +14,5 @@ func IncNonce(a []byte, dyn int) error {
 		}
 		a[l-i] = 0
 	}
-	return errors.New("incNonce: nonce expired")
+	return errors.New("IncNonce: nonce expired")
 }

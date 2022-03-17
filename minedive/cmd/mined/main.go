@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	b64 "encoding/base64"
-	"errors"
 	"flag"
 	"fmt"
 	"hash/fnv"
@@ -30,21 +29,6 @@ func printMemUsage() {
 	fmt.Printf("\tTotalAlloc = %v MiB", bToMb(m.TotalAlloc))
 	fmt.Printf("\tSys = %v MiB", bToMb(m.Sys))
 	fmt.Printf("\tNumGC = %v\n", m.NumGC)
-}
-
-func incNonce(a []byte, dyn int) error {
-	l := len(a)
-	if l < dyn {
-		dyn = l
-	}
-	for i := 1; i <= dyn; i++ {
-		if a[l-i] < 0xff {
-			a[l-i]++
-			return nil
-		}
-		a[l-i] = 0
-	}
-	return errors.New("incNonce: nonce expired")
 }
 
 func fnvhash(s string) uint64 {
