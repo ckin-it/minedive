@@ -3,6 +3,7 @@ module github.com/ckin-it/minedive/minedive
 go 1.16
 
 require (
+	github.com/gin-gonic/gin v1.7.7 // indirect
 	github.com/klauspost/compress v1.15.1 // indirect
 	github.com/pion/ice/v2 v2.2.2 // indirect
 	github.com/pion/webrtc/v3 v3.1.27
