@@ -7,19 +7,21 @@ let accept_protocols = ['http:', 'https:']
 function extract_results(_t)
 {
   let out = [];
-  let c = document.implementation.createHTMLDocument().documentElement;
-  c.innerHTML = _t;
-  log(_t);
-  let as = c.querySelector("div#res").querySelectorAll('a');
-  for(let i = 0; i < as.length; i++)
-  {
+  //let c = document.implementation.createHTMLDocument().documentElement;
+  //c.innerHTML = _t;
+  const parser = new DOMParser()
+  const parsed = parser.parseFromString(_t, `text/html`)
+  let as = parsed.querySelector("div#res").querySelectorAll('a');
+  for(let i = 0; i < as.length; i++) {
     let a = as[i];
-    let url
+    let url;
+    if (a.href != "") {
     try { url = new URL(a.href); 
       if(accept_protocols.includes(url.protocol) && !avoid_domains.includes(url.host)) {
         if(!out.includes(a.href)) out.push(a.href);
       }
-    } catch(error){log(a.href, error);}
+    } catch(error){log("new URL error:", a.href, error);}
+    }
   }
   return out;
 }
@@ -37,7 +39,8 @@ function resp_google_search_l2(l2, q, l) {
           text: r
         };
         log("sending...")
-        sendL2JSON(l2, msg);
+        //sendL2JSON(l2, msg);
+        replyL2(l2, msg);
       }
     };
     x.onerror = function(err) {

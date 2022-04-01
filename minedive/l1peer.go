@@ -48,6 +48,7 @@ func L1peerPing(cli *Client, p *L1Peer) {
 // newL1Peer is the creator
 func (cli *Client) newL1Peer(name string, alias string, initiator bool) (p *L1Peer) {
 	var dcLabel string
+	iceFinished := false
 	p = new(L1Peer)
 	p.Name = name
 	p.Alias = alias
@@ -68,23 +69,30 @@ func (cli *Client) newL1Peer(name string, alias string, initiator bool) (p *L1Pe
 		dcLabel = p.Name + cli.tid
 	}
 
-	pc.OnICEGatheringStateChange(func(state webrtc.ICEGathererState) {
-		//log.Println(state)
-	})
+	//pc.OnICEGatheringStateChange(func(state webrtc.ICEGathererState) {
+	//log.Println(state)
+	//})
 
 	pc.OnICECandidate(func(ice *webrtc.ICECandidate) {
-		//log.Println("ICE", ice)
+		log.Println("ICE", ice)
 		//nil candidate means we collected all candidates
 		if ice == nil {
 			if initiator {
-				close(p.gatherComplete)
+				if !iceFinished {
+					iceFinished = true
+					close(p.gatherComplete)
+				}
 			} else {
-				sdp := pc.LocalDescription().SDP
-				in := Cell{D0: cli.tid, D1: name, D2: sdp}
-				//log.Println("XXX ANSWER:", sdp)
-				in.Type = "answer"
-				JSONSuccessSend(cli, in)
-				close(p.gatherComplete)
+				if !iceFinished {
+					iceFinished = true
+					log.Println("responder ice finished, closing channel", cli.tid, name)
+					sdp := pc.LocalDescription().SDP
+					in := Cell{D0: cli.tid, D1: name, D2: sdp}
+					//log.Println("XXX ANSWER:", sdp)
+					in.Type = "answer"
+					JSONSuccessSend(cli, in)
+					close(p.gatherComplete)
+				}
 			}
 		}
 	})

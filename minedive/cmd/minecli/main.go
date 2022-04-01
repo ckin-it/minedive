@@ -64,10 +64,14 @@ func cmdLoop(c <-chan string) {
 					}
 					mineClient.Verbose = false
 				case "search":
+					lang := "en_US"
 					if mineClient == nil {
 						return
 					}
-					mineClient.SearchL2(cmd[1])
+					if len(cmd) > 2 {
+						lang = cmd[2]
+					}
+					mineClient.SearchL2(cmd[1], lang)
 				case "verbose":
 					if mineClient != nil {
 						mineClient.Verbose = true

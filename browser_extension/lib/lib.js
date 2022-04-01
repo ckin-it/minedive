@@ -1,3 +1,5 @@
+let log = console.log;
+
 function inc_nonce(nonce, dyn) {
   for(let i = 1; i <= dyn; i++)
   {

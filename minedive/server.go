@@ -54,7 +54,7 @@ func (gw *MinediveClient) GetAlias(username string) (string, error) {
 func (s *MinediveServer) InitMinediveServer() {
 	s.clientsMutex = &sync.Mutex{}
 	s.idMutex = &sync.Mutex{}
-	s.ServeMux.HandleFunc("/", s.minediveAccept)
+	s.ServeMux.HandleFunc("/ws", s.minediveAccept)
 	log.Println("MinediveServer initialized")
 }
 
@@ -74,7 +74,7 @@ func (s *MinediveServer) GetRandomName(id uint64, sseed string) string {
 }
 
 func (s *MinediveServer) minediveAccept(w http.ResponseWriter, r *http.Request) {
-	log.Println("minediveAccept invoked")
+	log.Println("minediveAccept invoked from", r.RemoteAddr)
 	opts := websocket.AcceptOptions{}
 	opts.InsecureSkipVerify = true
 	opts.Subprotocols = append(opts.Subprotocols, "json")

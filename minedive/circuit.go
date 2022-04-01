@@ -9,5 +9,6 @@ type Circuit struct {
 	Length   int
 }
 
-func Build(c *Circuit)  {}
-func Extend(c *Circuit) {}
+func Build(c *Circuit) {
+
+}

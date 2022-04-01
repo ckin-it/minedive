@@ -41,7 +41,8 @@ function arxiv_resp_search_l2(l2, q, l) {
           text: r
         };
         log("sending...")
-        sendL2JSON(l2, msg);
+        //sendL2JSON(l2, msg);
+        replyL2(l2, msg);
       }
     };
     x.onerror = function(err) {

@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"sync"
 	"time"
 
@@ -20,17 +19,18 @@ import (
 )
 
 type Client struct {
-	url     string
-	c       *websocket.Conn
-	L1Peers map[string]*L1Peer
-	L2Peers map[string]*L2Peer
-	pMu     *sync.RWMutex
-	pL2Mu   *sync.RWMutex
-	tid     string
-	reauth  string
-	Verbose bool
-	PrivK   [32]byte
-	PK      [32]byte
+	url      string
+	c        *websocket.Conn
+	L1Peers  map[string]*L1Peer
+	L2Peers  map[string]*L2Peer
+	Searcher func(string, string, string)
+	pMu      *sync.RWMutex
+	pL2Mu    *sync.RWMutex
+	tid      string
+	reauth   string
+	Verbose  bool
+	PrivK    [32]byte
+	PK       [32]byte
 }
 
 func (cli *Client) CreateOffer(target string, alias string) {
@@ -74,7 +74,8 @@ func (cli *Client) AcceptAnswer(target, sdp string) {
 		desc.Type = webrtc.SDPTypeAnswer
 		err := p.pc.SetRemoteDescription(desc)
 		if err != nil {
-			log.Fatal(cli.tid, target, err)
+			//log.Fatal(cli.tid, target, err)
+			log.Println("XXX", cli.tid, target, err)
 		}
 		<-p.dataChanOpen
 	} else {
@@ -84,9 +85,10 @@ func (cli *Client) AcceptAnswer(target, sdp string) {
 }
 
 func newClient(ctx context.Context, url string) (*Client, error) {
-	transport := http.Transport{}
-	httpClient := http.Client{Transport: &transport}
-	opts := websocket.DialOptions{HTTPClient: &httpClient}
+	//transport := http.Transport{}
+	//httpClient := http.Client{Transport: &transport}
+	//opts := websocket.DialOptions{HTTPClient: &httpClient}
+	opts := websocket.DialOptions{}
 	opts.Subprotocols = append(opts.Subprotocols, "json")
 	c, _, err := websocket.Dial(ctx, url, &opts)
 	if err != nil {
@@ -107,7 +109,10 @@ func newClient(ctx context.Context, url string) (*Client, error) {
 
 func (c *Client) DeletePeer(name string) {
 	c.pMu.Lock()
-	delete(c.L1Peers, name)
+	_, ok := c.L1Peers[name]
+	if ok {
+		delete(c.L1Peers, name)
+	}
 	c.pMu.Unlock()
 	fmt.Println("peer", name, "deleted")
 }
@@ -141,11 +146,11 @@ func (c *Client) SendL2(l2 *L2Peer, b []byte) error {
 	return err
 }
 
-func (c *Client) SearchL2(q string) {
+func (c *Client) SearchL2(q string, lang string) {
 	m := L2Msg{
 		Type:  "search",
 		Query: q,
-		Lang:  "en-US",
+		Lang:  lang,
 	}
 	b, err := json.Marshal(m)
 	if err != nil {
@@ -157,10 +162,12 @@ func (c *Client) SearchL2(q string) {
 			c.SendL2(l2, b)
 		} else {
 			fmt.Println(c.tid, "GW readyState is:", l2.GW.dc.ReadyState().String())
+			if l2.GW.dc.ReadyState() == webrtc.DataChannelStateClosed {
+				c.DeleteL2Peer(l2.Name)
+			}
 		}
 	}
 	c.pL2Mu.RUnlock()
-
 }
 
 func (c *Client) GetNL2Peers() int {
@@ -206,6 +213,15 @@ func (c *Client) GetL2PeerIfExists(name string) (*L2Peer, bool) {
 		}
 	}
 	return nil, false
+}
+
+func (c *Client) DeleteL2Peer(name string) {
+	c.pL2Mu.Lock()
+	_, ok := c.L2Peers[name]
+	if ok {
+		delete(c.L2Peers, name)
+	}
+	c.pL2Mu.Unlock()
 }
 
 func (c *Client) AddL2Peer(l2 *L2Peer) {
@@ -298,6 +314,9 @@ func (c *Client) HandleL2Msg(gw *L1Peer, data []byte) {
 			Type:  "resp",
 			Query: dm.Query,
 			//Text:  []string{dm.Query, "prova1", "prova2", "prova3"},
+		}
+		if c.Searcher != nil {
+			c.Searcher(l2.Name, dm.Query, dm.Lang)
 		}
 		b, err := json.Marshal(m)
 		if err != nil {

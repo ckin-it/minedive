@@ -1,15 +1,16 @@
 {
+  "manifest_version": 2,
   "name": "minedive",
   "version": "0.0.5",
   "description": "Minedive is a privacy conscious P2P search engine",
   "permissions": [
+    "storage",
+    "unlimitedStorage",
     "idle",
     "*://*.google.com/",
     "*://*.google.it/",
     "*://arxiv.org/",
-    "*://*.arxiv.org/",
-    "storage",
-    "unlimitedStorage"
+    "*://*.arxiv.org/"
   ],
   "icons": {
     "16": "images/minedive16.png",
@@ -17,24 +18,16 @@
     "48": "images/minedive48.png",
     "128": "images/minedive128.png"
   },
+  "content_security_policy": "script-src 'self' 'unsafe-eval'; object-src 'self'",
   "background": {
     "scripts": [
-      "vendor/nacl-util.min.js",
-      "vendor/nacl-fast.min.js",
+      "lib/lib.js",
+      "lib/wasm_exec.js",
       "search_engine/google.js",
       "search_engine/arxiv.js",
-      "core/circuit.js",
+      "search_engine/search.js",
       "core/conf.js",
-      "core/browserAction.js",
-      "core/lib.js",
-      "core/l1.js",
-      "core/l2.js",
-      "core/histbook.js",
-      "core/debug.js",
-      "core/background_opts.js",
-      "core/webrtc.js",
-      "core/websock.js",
-      "core/background.js"
+      "service_worker.js"
     ]
   },
   "browser_action": {
@@ -45,6 +38,5 @@
       "48": "images/minedive48.png",
       "128": "images/minedive128.png"
     }
-  },
-  "manifest_version": 2
+  }
 }
