@@ -1,31 +1,13 @@
  <!DOCTYPE html>
   <html>
     <head>
-      <style>
-        div#status {
-          white-space: pre;
-        }
-        button {
-          height: 30px;
-          width: 128px;
-          outline: none;
-          background-color: #4885ed;
-          border: none;
-          margin: 3px;
-          color: white;
-          text-decoration: bold;
-          text-align: center;
-        }
-        button:disabled {
-          background-color: white;
-        }
-      </style>
+      <link rel="stylesheet" href="minedive.css">
     </head>
     <body>
-      <div id='status'>Connecting to WS server</div>
+      <div id='status-p'>Connecting to WS server</div>
       <div>
-      <button id="search">Search</button>
-      <button id="options">Options</button>
+      <button class="popup" id="search-pb">Search</button>
+      <button class="popup" id="options-pb">Options</button>
       </div>
       <script src="/ui/db.js"></script>
       <script src="/ui/sanitize.js"></script>
