@@ -20,6 +20,7 @@ document.getElementById('search').onkeydown = function(e) {
   if(e.key == 'Enter') {
     let s = document.getElementById('search');
     q = encodeURIComponent(s.value);
+    //XXX other side decodeURIComponent
     search_all(s.value);
   }
 }
