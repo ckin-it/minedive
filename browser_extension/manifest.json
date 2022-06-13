@@ -1,11 +1,10 @@
 {
   "manifest_version": 2,
   "name": "minedive",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Minedive is a privacy conscious P2P search engine",
   "permissions": [
     "storage",
-    "unlimitedStorage",
     "idle",
     "*://*.google.com/",
     "*://*.google.it/",

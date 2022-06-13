@@ -1,8 +1,17 @@
 package minedive
 
 type minL1Msg struct {
-	From string `json:"from"`
+	From string `json:"from,omitempty"`
 	Type string `json:"type"`
+}
+
+type encL1Msg struct {
+	From  string `json:"from"` //???
+	Type  string `json:"type"`
+	Key   string `json:"key"` //the Key is also the circuit ID
+	TPK   string `json:"tpk"` //target public key, not total party kill. Really needed???
+	Nonce string `json:"nonce"`
+	CT    string `json:"ct"` //cyphertext
 }
 
 type pingL1Msg struct {

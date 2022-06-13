@@ -1,5 +1,12 @@
+let connectedPorts = [];
+
+chrome.runtime
+
 chrome.runtime.onConnect.addListener(function(port) {
+  connectedPorts.push(port);
+  log("connecting new port [", connectedPorts.length, "]");
   port.onMessage.addListener( function(msg) {
+    log("port print:", msg);
     switch(msg.type) {
       case 'status':
         let peers_number_l1 = MinediveGetNL1(); //XXX fix this
@@ -23,15 +30,34 @@ chrome.runtime.onConnect.addListener(function(port) {
       case 'apply_options':
         MinediveReConnect(options.ws_server, options.minL1);
         break;
+      case 'new-circuit':
+        MinediveNewCircuit(options.ws_server, options.minL1, options.minL2);
+        //MinediveReConnect(options.ws_server, options.minL1);
+        break;
       case 'search':
         //XXX maybe promise and reply in port?
         //maybe other message polling?
         //maybe storage?
+        log('searching for ['+msg.q+']');
         MinediveSearch(msg.q, options.lang);
       break;
     }
   });
 });
+
+function respond(a) {
+  log('respond invoked', a);
+  for( var i = 0; i < connectedPorts.length; i++){ 
+    try { 
+      log('send to...', i, connectedPorts[i]);
+      connectedPorts[i].postMessage(a); 
+    } catch {
+      log('splice connectedPort', i)
+      connectedPorts.splice(i, 1);
+      i--;
+    }
+  }
+}
 
 const go = new Go();
 

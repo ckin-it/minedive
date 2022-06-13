@@ -1,6 +1,9 @@
 package minedive
 
-import "errors"
+import (
+	b64 "encoding/base64"
+	"errors"
+)
 
 func IncNonce(a []byte, dyn int) error {
 	l := len(a)
@@ -15,4 +18,9 @@ func IncNonce(a []byte, dyn int) error {
 		a[l-i] = 0
 	}
 	return errors.New("IncNonce: nonce expired")
+}
+
+func UseNonce(a []byte) (string, error) {
+	err := IncNonce(a, len(a))
+	return b64.StdEncoding.EncodeToString(a), err
 }

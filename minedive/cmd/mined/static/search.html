@@ -2,21 +2,22 @@
 <html lang="en" dir="ltr">
 <head>
   <meta charset="UTF-8">
-  <link rel="stylesheet" href="minedive.css">
+  <link rel="stylesheet" href="/static/minedive.css">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
 <body>
-  <div class="wrapper" id="wrapper">
-    <form id="searchform">
+  <div class="wrapper">
+    <form>
       <div role="search">
         <label class="search-label" for="search">Search the Internet with minedive
           <p id="error" role="alert"></p>
         </label>
         <input id="search" class="search-input" type="text">
-        <input id="search-button" class="button" type="button" value="Search">
+        <input id="search-button" class="button" type="button" value="Search" onclick="_search();">
       </div>
     </form>
+    <div id='results'></div>
   </div>
 </body>
-<script src="search.js"></script>
+<script src="/static/search.js"></script>
 </html>

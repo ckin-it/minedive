@@ -7,8 +7,6 @@ let accept_protocols = ['http:', 'https:']
 function extract_results(_t)
 {
   let out = [];
-  //let c = document.implementation.createHTMLDocument().documentElement;
-  //c.innerHTML = _t;
   const parser = new DOMParser()
   const parsed = parser.parseFromString(_t, `text/html`)
   let as = parsed.querySelector("div#res").querySelectorAll('a');
@@ -26,9 +24,10 @@ function extract_results(_t)
   return out;
 }
 
-function resp_google_search_l2(l2, q, l) {
+function resp_google_search_l2(l2, q, l, key, nonce) {
     let x = new XMLHttpRequest();
-    let url = 'http://www.google.com/search?q='+q+'&lr='+l+'&hl='+l;
+    sq = encodeURIComponent(q);
+    let url = 'http://www.google.com/search?q='+sq+'&lr='+l+'&hl='+l;
     log(url)
     x.onload = function () {
       if(x.status == 200) {
@@ -39,8 +38,12 @@ function resp_google_search_l2(l2, q, l) {
           text: r
         };
         log("sending...")
+        log(r);
         //sendL2JSON(l2, msg);
-        replyL2(l2, msg);
+        log("L2 in js:", l2);
+        if(l2){replyL2(l2, key, nonce, msg);}
+      } else {
+        log(x.status);
       }
     };
     x.onerror = function(err) {

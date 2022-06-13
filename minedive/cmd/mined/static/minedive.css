@@ -42,6 +42,7 @@ body {
 }
 
 .wrapper {
+	max-width: 600px;
 	margin-left: auto;
 	margin-right: auto;
 	margin-top: 2em;
@@ -51,27 +52,6 @@ body {
   border: 1px solid rgba(0, 0, 0, 0.15);
   border-radius: 5px;
   padding: 50px;
-}
-
-.wrapper .results {
-	font-size: 18px;
-  border: 1px solid rgba(0, 0, 0, 0.15);
-  border-radius: 5px;
-  padding: 20px 50px 50px 50px;
-}
-
-.wrapper .results ol {
-	margin-block-start: 1em;
-	padding-inline-start: 0px;
-}
-
-.wrapper .results li{
-	list-style: none!important;
-	margin: 1em 0em 1em 0em;
-}
-
-.wrapper .results a{
-	text-decoration: none;
 }
 
 .button {

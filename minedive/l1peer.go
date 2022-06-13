@@ -1,6 +1,8 @@
 package minedive
 
 import (
+	"bytes"
+	b64 "encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -8,13 +10,19 @@ import (
 	"time"
 
 	"github.com/pion/webrtc/v3"
+	"golang.org/x/crypto/nacl/box"
+	"golang.org/x/crypto/nacl/secretbox"
 )
 
 var rtcConfig = webrtc.Configuration{
 	ICEServers: []webrtc.ICEServer{
-		{
-			URLs: []string{"stun:stun.l.google.com:19302"},
-		},
+		{URLs: []string{"stun:stun.l.google.com:19302"}},
+		//{URLs: []string{"stun:meet-jit-si-turnrelay.jitsi.net:443"}},
+		// {
+		// 	URLs:       []string{"turn:openrelay.metered.ca:80"},
+		// 	Username:   "openrelayproject",
+		// 	Credential: "openrelayproject",
+		// },
 	},
 }
 
@@ -27,6 +35,13 @@ type L1Peer struct {
 	c              *Client
 	gatherComplete chan struct{}
 	dataChanOpen   chan struct{}
+	Exit           bool
+	K              [32]byte
+}
+
+func (p *L1Peer) Msg(msg string) error {
+	err := p.dc.SendText(msg)
+	return err
 }
 
 func L1peerPing(cli *Client, p *L1Peer) {
@@ -45,13 +60,281 @@ func L1peerPing(cli *Client, p *L1Peer) {
 	}
 }
 
+func (cli *Client) EncL1Msg(p *L1Peer, msg []byte) {
+	m := encL1Msg{}
+	m.Type = "enc"
+	//m.CT = encrypt(msg)
+	b, err := json.Marshal(m)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	//box.Precompute(&l2.K, &l2.PK, &cli.PrivK)
+	p.dc.SendText(string(b))
+	return
+}
+
+func (cli *Client) DecL1Msg(p *L1Peer, msg webrtc.DataChannelMessage) {
+	m := encL1Msg{}
+	json.Unmarshal(msg.Data, &m)
+	switch m.Type {
+	case "encrep":
+		cli.routeMu.RLock()
+		tgt, ok := cli.Routes[m.TPK]
+		cli.routeMu.RUnlock()
+		log.Printf("%s LOOKING FOR ROUTE %s (%v)\n", cli.tid, m.TPK, ok)
+		if ok {
+			tgt.dc.SendText(string(msg.Data))
+			return
+		}
+		log.Println("Response received!")
+		var circuit *Circuit
+		for _, c := range cli.Circuits {
+			if c.CircuitID == m.TPK {
+				log.Println("Right circuit found!")
+				circuit = c
+				break
+			}
+		}
+		if circuit != nil {
+			m2 := &webrtc.DataChannelMessage{}
+			nonce, err := b64.StdEncoding.DecodeString(m.Nonce)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			var nonce2 [24]byte
+			copy(nonce2[:], nonce[:24])
+			ct, err := b64.StdEncoding.DecodeString(m.CT)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			decrypted, ok := secretbox.Open(nil, ct, &nonce2, &circuit.Exit.TKey)
+			if !ok {
+				log.Println("Decryption failed")
+				return
+			}
+			m2.Data = decrypted
+			cli.handleL1Msg(p, *m2, nil)
+		}
+	case "enc":
+		_, ok := cli.Routes[m.Key]
+		if !ok {
+			log.Println(cli.tid, "ADDING ROUTE FOR", m.Key, "TO", p.Name)
+			cli.routeMu.Lock()
+			cli.Routes[m.Key] = p
+			cli.routeMu.Unlock()
+		}
+		//log.Println(m)
+		//log.Println("Decoding message! 2")
+		tpk, err := b64.StdEncoding.DecodeString(m.TPK)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		if bytes.Compare(tpk, cli.PK[:]) != 0 {
+			log.Println("target key not found, discarded")
+			return
+		}
+		nonce, err := b64.StdEncoding.DecodeString(m.Nonce)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		var nonce2 [24]byte
+		copy(nonce2[:], nonce[:24])
+		ct, err := b64.StdEncoding.DecodeString(m.CT)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		var k [32]byte
+		tmpk, err := b64.StdEncoding.DecodeString(m.Key)
+		copy(k[:], tmpk[:32])
+		log.Println("circuit key:", b64.StdEncoding.EncodeToString(k[:]))
+		box.Precompute(&k, &k, &cli.PrivK)
+		decrypted, ok := secretbox.Open(nil, ct, &nonce2, &k)
+		if !ok {
+			log.Println("Decryption failed")
+			return
+		}
+		m2 := &webrtc.DataChannelMessage{}
+		//XXX m2.IsString = false
+		m2.Data = decrypted
+		log.Println("Message decoded, going to handle")
+		cli.handleL1Msg(p, *m2, &m)
+	default:
+		cli.handleL1Msg(p, msg, nil)
+	}
+}
+
+func (cli *Client) handleL1Msg(p *L1Peer, msg webrtc.DataChannelMessage, encMsg *encL1Msg) {
+	m := minL1Msg{}
+	json.Unmarshal(msg.Data, &m)
+	//fmt.Printf("MSG [%s] FROM [%s]\n", m.Type, p.Name)
+	switch m.Type {
+	case "ey":
+		p.Exit = true
+	case "en":
+		p.Exit = false
+	case "search":
+		if encMsg == nil {
+			return
+		}
+		m := L2Msg{}
+		json.Unmarshal(msg.Data, &m)
+
+		log.Println(cli.tid, "search as browser?", cli.Browser)
+		if cli.Searcher != nil {
+			cli.Searcher(cli, encMsg.Key, m.Query, m.Lang, encMsg.Key, encMsg.Nonce)
+		}
+		b, err := json.Marshal(m)
+		if err != nil {
+			log.Println(cli.tid, "HandleL2 Resp Marshal:", err)
+			return
+		}
+		_ = b
+		//XXX err = c.SendL2(l2, b) dealt inside the search?
+		if err != nil {
+			log.Println(cli.tid, "HandleL2 Resp SendL2:", err)
+			return
+		}
+	case "e?":
+		if cli.Browser {
+			m.Type = "ey"
+		} else {
+			m.Type = "en"
+		}
+		m.From = cli.tid
+		b, err := json.Marshal(m)
+		assertSuccess(err)
+		err = p.dc.SendText(string(b))
+		assertSuccess(err) //XXX debug
+	case "respv2":
+		m := L2Msg{}
+		json.Unmarshal(msg.Data, &m)
+		// for _, s := range m.Text {
+		// 	fmt.Println("XXX", s)
+		// }
+		if cli.Responder != nil {
+			log.Println("RESPONDER TRIGGERED")
+			cli.Responder(cli, string(msg.Data))
+		} else {
+			log.Println("Responder not implemented")
+		}
+	case "connect":
+		m := FwdMsg{}
+		json.Unmarshal(msg.Data, &m)
+		go cli.newL1Peer(m.To, "", true, false)
+	case "ping":
+		pingMsg := pingL1Msg{}
+		json.Unmarshal(msg.Data, &pingMsg)
+		pingMsg.Type = "pong"
+		pingMsg.From = cli.tid
+		b, err := json.Marshal(pingMsg)
+		assertSuccess(err)
+		err = p.dc.SendText(string(b))
+		assertSuccess(err) //XXX debug
+	case "pong":
+		m := pingL1Msg{}
+		json.Unmarshal(msg.Data, &m)
+		//XXX store the result in the peer
+		if cli.Verbose {
+			now := time.Now()
+			thenInt, _ := strconv.ParseInt(m.Text, 10, 64)
+			then := time.Unix(0, thenInt)
+			fmt.Println("ping", m.From, now.Sub(then))
+		}
+	case "getl2":
+		//fmt.Println(cli.tid, "receiving getl2 from", m.From)
+		r := cli.GetOtherPeers(m.From)
+		if len(r) == 0 {
+			//fmt.Println(cli.tid, "not sending l2 to", m.From)
+			return
+		}
+		//fmt.Println(cli.tid, "sending (", len(r), ") l2 to", m.From)
+		//fmt.Println(cli.tid, "sending ", r)
+		m := L2L1Msg{
+			Type: "l2",
+			From: cli.tid,
+			L2:   r,
+			I:    0,
+		}
+		//XXX should I and could I trigger ask key?
+		b, err := json.Marshal(m)
+		assertSuccess(err)
+		//fmt.Println("L2 msg sending:", m)
+		err = p.dc.SendText(string(b))
+		assertSuccess(err) //XXX debug
+	case "test":
+		log.Println(cli.tid, "TEST MSG RECEIVED")
+		cli.ReplyCircuit("{\"type\":\"test2\"}", encMsg.Key, encMsg.Nonce)
+	case "test2":
+		log.Println(cli.tid, "REPLY TEST MSG RECEIVED")
+		cli.Circuits[0].State = 1000
+	case "fwd2":
+		m := FwdMsg{}
+		json.Unmarshal(msg.Data, &m)
+		tgt, ok := cli.GetPeer(m.To)
+		if ok {
+			b, err := b64.StdEncoding.DecodeString(m.Ori)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			//log.Printf("Peer %s should get %s\n", m.To, b)
+			tgt.dc.SendText(string(b))
+		} else {
+			log.Printf("Peer %s not found\n", m.To)
+		}
+		return
+	case "fwd":
+		m := FwdMsg{}
+		json.Unmarshal(msg.Data, &m)
+		if m.To == cli.tid {
+			cli.HandleL2Msg(p, msg.Data)
+			return
+		}
+		next, ok := cli.GetPeerByAlias(m.To)
+		if !ok {
+			fmt.Println("next not found")
+			return
+		}
+		//fmt.Println(cli.tid, "next found:", next.Name, "ori:", p.Name)
+		m.From = cli.tid
+		m.Ori = p.Alias
+		m.To = next.Name
+		b, err := json.Marshal(m)
+		assertSuccess(err)
+		next.dc.SendText(string(b))
+	case "l2":
+		var m L2L1Msg
+		var askKey bool
+		err := json.Unmarshal(msg.Data, &m)
+		if err != nil {
+			fmt.Println("L2 msg unmarshal err:", err, string(msg.Data))
+		}
+		if m.I == 1 {
+			askKey = true
+		}
+		for _, s := range m.L2 {
+			_ = askKey
+			cli.GetL2Peer(s, p, true) //XXX ignored askKey
+		}
+	default:
+		fmt.Println("msg", m.Type, "not implemented")
+	}
+}
+
 // newL1Peer is the creator
-func (cli *Client) newL1Peer(name string, alias string, initiator bool) (p *L1Peer) {
+func (cli *Client) newL1Peer(name string, alias string, initiator bool, exit bool) (p *L1Peer) {
 	var dcLabel string
 	iceFinished := false
 	p = new(L1Peer)
 	p.Name = name
 	p.Alias = alias
+	p.Exit = exit
 	//p.rtcConfig = rtcConfig
 	pc, err := webrtc.NewPeerConnection(rtcConfig)
 	assertSuccess(err)
@@ -74,7 +357,7 @@ func (cli *Client) newL1Peer(name string, alias string, initiator bool) (p *L1Pe
 	//})
 
 	pc.OnICECandidate(func(ice *webrtc.ICECandidate) {
-		log.Println("ICE", ice)
+		//log.Println("ICE", ice)
 		//nil candidate means we collected all candidates
 		if ice == nil {
 			if initiator {
@@ -85,7 +368,7 @@ func (cli *Client) newL1Peer(name string, alias string, initiator bool) (p *L1Pe
 			} else {
 				if !iceFinished {
 					iceFinished = true
-					log.Println("responder ice finished, closing channel", cli.tid, name)
+					//log.Println("responder ice finished, closing gatherChannel", cli.tid, name)
 					sdp := pc.LocalDescription().SDP
 					in := Cell{D0: cli.tid, D1: name, D2: sdp}
 					//log.Println("XXX ANSWER:", sdp)
@@ -94,6 +377,8 @@ func (cli *Client) newL1Peer(name string, alias string, initiator bool) (p *L1Pe
 					close(p.gatherComplete)
 				}
 			}
+		} else {
+			//log.Println("ICE details:", ice.Typ, ice.Address)
 		}
 	})
 
@@ -112,87 +397,8 @@ func (cli *Client) newL1Peer(name string, alias string, initiator bool) (p *L1Pe
 		// Register text message handling
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
 			//fmt.Printf("Message from DataChannel '%s': '%s'\n", dc.Label(), string(msg.Data))
-			m := minL1Msg{}
-			json.Unmarshal(msg.Data, &m)
-			switch m.Type {
-			case "ping":
-				pingMsg := pingL1Msg{}
-				json.Unmarshal(msg.Data, &pingMsg)
-				pingMsg.Type = "pong"
-				pingMsg.From = cli.tid
-				b, err := json.Marshal(pingMsg)
-				assertSuccess(err)
-				err = p.dc.SendText(string(b))
-				if err != nil {
-					log.Println("onMessage Ping:", err)
-				}
-			case "pong":
-				m := pingL1Msg{}
-				json.Unmarshal(msg.Data, &m)
-				//XXX store the result in the peer
-				if cli.Verbose {
-					now := time.Now()
-					thenInt, _ := strconv.ParseInt(m.Text, 10, 64)
-					then := time.Unix(0, thenInt)
-					fmt.Println("ping", m.From, now.Sub(then))
-				}
-			case "getl2":
-				//fmt.Println(cli.tid, "receiving getl2 from", m.From)
-				r := cli.GetOtherPeers(m.From)
-				if len(r) == 0 {
-					//fmt.Println(cli.tid, "not sending l2 to", m.From)
-					return
-				}
-				//fmt.Println(cli.tid, "sending (", len(r), ") l2 to", m.From)
-				//fmt.Println(cli.tid, "sending ", r)
-				m := L2L1Msg{
-					Type: "l2",
-					From: cli.tid,
-					L2:   r,
-					I:    0,
-				}
-				//XXX should I and could I trigger ask key?
-				b, err := json.Marshal(m)
-				assertSuccess(err)
-				//fmt.Println("L2 msg sending:", m)
-				err = p.dc.SendText(string(b))
-				assertSuccess(err) //XXX debug
-			case "fwd":
-				m := FwdMsg{}
-				json.Unmarshal(msg.Data, &m)
-				if m.To == cli.tid {
-					cli.HandleL2Msg(p, msg.Data)
-					return
-				}
-				next, ok := cli.GetPeerByAlias(m.To)
-				if !ok {
-					fmt.Println("next not found")
-					return
-				}
-				//fmt.Println(cli.tid, "next found:", next.Name, "ori:", p.Name)
-				m.From = cli.tid
-				m.Ori = p.Alias
-				m.To = next.Name
-				b, err := json.Marshal(m)
-				assertSuccess(err)
-				next.dc.SendText(string(b))
-			case "l2":
-				var m L2L1Msg
-				var askKey bool
-				err := json.Unmarshal(msg.Data, &m)
-				if err != nil {
-					fmt.Println("L2 msg unmarshal err:", err, string(msg.Data))
-				}
-				if m.I == 1 {
-					askKey = true
-				}
-				for _, s := range m.L2 {
-					_ = askKey
-					cli.GetL2Peer(s, p, true) //XXX ignored askKey
-				}
-			default:
-				fmt.Println("msg", m.Type, "not implemented")
-			}
+			//cli.handleL1Msg(p, msg)
+			cli.DecL1Msg(p, msg)
 		})
 		go L1peerPing(cli, p)
 	})

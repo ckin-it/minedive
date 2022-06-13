@@ -11,6 +11,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,12 +23,16 @@ import (
 )
 
 type MinediveServer struct {
-	clients      []*MinediveClient
-	clientsMutex *sync.Mutex
-	nextID       uint64
-	idMutex      *sync.Mutex
-	ServeMux     http.ServeMux
-	Dispatch     func(*MinediveClient, Cell)
+	clients       []*MinediveClient
+	clientsMutex  *sync.Mutex
+	nextID        uint64
+	idMutex       *sync.Mutex
+	ServeMux      http.ServeMux
+	Dispatch      func(*MinediveClient, Cell)
+	exits         map[string]*MinediveClient
+	exitsRWMutex  *sync.RWMutex
+	guards        map[string]*MinediveClient
+	guardsRWMutex *sync.RWMutex
 }
 
 //MinediveClient is the view the has of a connected client
@@ -35,11 +40,14 @@ type MinediveClient struct {
 	ID         string
 	Name       string
 	TKID       string
-	SecretKey  [32]byte
-	PublicKey  [32]byte
+	SecretKey  [32]byte //internally used???
+	PublicKey  [32]byte //internally used???
+	PubK       [32]byte
 	Nonce      [24]byte
 	RemoteAddr string
 	Ws         *websocket.Conn
+	Exit       bool
+	Guard      bool
 }
 
 //GetAlias return the name a peer is seen behind another peer
@@ -54,12 +62,107 @@ func (gw *MinediveClient) GetAlias(username string) (string, error) {
 func (s *MinediveServer) InitMinediveServer() {
 	s.clientsMutex = &sync.Mutex{}
 	s.idMutex = &sync.Mutex{}
-	s.ServeMux.HandleFunc("/ws", s.minediveAccept)
+	s.exitsRWMutex = &sync.RWMutex{}
+	s.guardsRWMutex = &sync.RWMutex{}
+	s.guards = make(map[string]*MinediveClient)
+	s.exits = make(map[string]*MinediveClient)
+	//s.ServeMux.HandleFunc("/ws", s.minediveAccept)
 	log.Println("MinediveServer initialized")
 }
 
+func (s *MinediveServer) AddExit(cli *MinediveClient) {
+	s.exitsRWMutex.Lock()
+	s.exits[cli.Name] = cli
+	s.exitsRWMutex.Unlock()
+}
+
+func (s *MinediveServer) DelExit(cliName string) {
+	s.exitsRWMutex.Lock()
+	delete(s.exits, cliName)
+	s.exitsRWMutex.Unlock()
+}
+
+//XXX recheck for skipped
+func (s *MinediveServer) GetExit(avoid map[string]bool) (cli *MinediveClient, err error) {
+	cli = nil
+	s.exitsRWMutex.RLock()
+	skip := rand.Intn(len(s.exits))
+	i := 0
+	for cn := range s.exits {
+		if i > skip {
+			_, ok := avoid[cn]
+			if ok == false {
+				cli = s.exits[cn]
+				break
+			}
+		}
+		i++
+	}
+	i = 0
+	for cn := range s.exits {
+		if i <= skip {
+			_, ok := avoid[cn]
+			if ok == false {
+				cli = s.exits[cn]
+				break
+			}
+		}
+		i++
+	}
+	s.exitsRWMutex.RUnlock()
+	if cli == nil {
+		return nil, errors.New("no exits available")
+	}
+	return cli, nil
+}
+
+func (s *MinediveServer) AddGuard(cli *MinediveClient) {
+	s.guardsRWMutex.Lock()
+	s.guards[cli.Name] = cli
+	s.guardsRWMutex.Unlock()
+}
+
+func (s *MinediveServer) DelGuard(cliName string) {
+	s.guardsRWMutex.Lock()
+	delete(s.guards, cliName)
+	s.guardsRWMutex.Unlock()
+}
+
+func (s *MinediveServer) GetGuard(avoid map[string]bool) (cli *MinediveClient, err error) {
+	cli = nil
+	s.guardsRWMutex.RLock()
+	skip := rand.Intn(len(s.guards))
+	i := 0
+	for cn := range s.guards {
+		if i > skip {
+			_, ok := avoid[cn]
+			if ok == false {
+				cli = s.guards[cn]
+				break
+			}
+		}
+		i++
+	}
+	i = 0
+	for cn := range s.guards {
+		if i <= skip {
+			_, ok := avoid[cn]
+			if ok == false {
+				cli = s.guards[cn]
+				break
+			}
+		}
+		i++
+	}
+	s.guardsRWMutex.RUnlock()
+	if cli == nil {
+		return nil, errors.New("no guards available")
+	}
+	return cli, nil
+}
+
 //GetRandomName is ...
-func (s *MinediveServer) GetRandomName(id uint64, sseed string) string {
+func GetRandomName(id uint64, sseed string) string {
 	bid := make([]byte, 8)
 	binary.LittleEndian.PutUint64(bid, id)
 	token := make([]byte, 24)
@@ -73,13 +176,25 @@ func (s *MinediveServer) GetRandomName(id uint64, sseed string) string {
 	return r
 }
 
-func (s *MinediveServer) minediveAccept(w http.ResponseWriter, r *http.Request) {
-	log.Println("minediveAccept invoked from", r.RemoteAddr)
+func (s *MinediveServer) MinediveAccept(w http.ResponseWriter, r *http.Request) {
+	var remoteAddr string
+	host := r.Header.Get("X-Real-IP")
+	if host != "" {
+		port := strings.Split(r.RemoteAddr, ":")
+		if len(port) == 2 {
+			remoteAddr = fmt.Sprintf("%s:%s", host, port[1])
+		} else {
+			remoteAddr = fmt.Sprintf("%s(%s)", host, r.RemoteAddr)
+		}
+	} else {
+		remoteAddr = r.RemoteAddr
+	}
+	log.Printf("minediveAccept invoked from %s\n", remoteAddr)
 	opts := websocket.AcceptOptions{}
 	opts.InsecureSkipVerify = true
 	opts.Subprotocols = append(opts.Subprotocols, "json")
 	//opts.OriginPatters
-	log.Println("subproto", opts.Subprotocols)
+	//log.Println("subproto", opts.Subprotocols)
 	ws, err := websocket.Accept(w, r, &opts)
 	if err != nil {
 		log.Println(err)
@@ -93,7 +208,7 @@ func (s *MinediveServer) minediveAccept(w http.ResponseWriter, r *http.Request) 
 	s.nextID++
 	s.idMutex.Unlock()
 	cli.Ws = ws
-	cli.RemoteAddr = ""
+	cli.RemoteAddr = remoteAddr
 	if _, err := io.ReadFull(crand.Reader, cli.SecretKey[:]); err != nil {
 		log.Println(err)
 		websocket.CloseStatus(err)
@@ -133,6 +248,12 @@ func (s *MinediveServer) DeleteClientByName(name string) error {
 			s.clients[len-1] = nil
 			s.clients = s.clients[:len-1]
 			s.clientsMutex.Unlock()
+			if c.Exit {
+				s.DelExit(c.Name)
+			}
+			if c.Guard {
+				s.DelGuard(c.Name)
+			}
 			return nil
 		}
 	}
@@ -203,11 +324,17 @@ func (s *MinediveServer) SendPeer(cli *MinediveClient) {
 	p1.Type = "user"
 	p1.D0 = cli.Name
 	p1.D1, err = c2.GetAlias(cli.Name)
+	if cli.Exit {
+		p1.D2 = "e"
+	}
 	if err != nil {
 		log.Println(err)
 	}
 	p2.D0 = c2.Name
 	p2.D1, err = cli.GetAlias(c2.Name)
+	if c2.Exit {
+		p2.D2 = "e"
+	}
 	if err != nil {
 		log.Println(err)
 	}

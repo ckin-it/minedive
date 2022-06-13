@@ -19,22 +19,29 @@ import (
 )
 
 type Client struct {
-	url      string
-	c        *websocket.Conn
-	L1Peers  map[string]*L1Peer
-	L2Peers  map[string]*L2Peer
-	Searcher func(string, string, string)
-	pMu      *sync.RWMutex
-	pL2Mu    *sync.RWMutex
-	tid      string
-	reauth   string
-	Verbose  bool
-	PrivK    [32]byte
-	PK       [32]byte
+	url       string
+	c         *websocket.Conn
+	L1Peers   map[string]*L1Peer
+	L2Peers   map[string]*L2Peer
+	Searcher  func(*Client, string, string, string, string, string) //l2, q, lang, key, nonce
+	Responder func(*Client, string)                                 //
+	pMu       *sync.RWMutex
+	pL2Mu     *sync.RWMutex
+	tid       string
+	reauth    string
+	Verbose   bool
+	PrivK     [32]byte
+	PK        [32]byte
+	Browser   bool
+	kMu       *sync.RWMutex
+	Keys      map[string][32]byte
+	Circuits  []*Circuit
+	Routes    map[string]*L1Peer
+	routeMu   *sync.RWMutex
 }
 
-func (cli *Client) CreateOffer(target string, alias string) {
-	cli.newL1Peer(target, alias, true)
+func (cli *Client) CreateOffer(target string, alias string, exit bool) {
+	cli.newL1Peer(target, alias, true, exit)
 }
 
 func (cli *Client) AcceptOffer(target string, sdp string) {
@@ -44,7 +51,7 @@ func (cli *Client) AcceptOffer(target string, sdp string) {
 	p, ok = cli.GetPeer(target)
 	if !ok {
 		log.Println(cli.tid, "Peer", target, "not found when accepting offer")
-		p = cli.newL1Peer(target, "XXX", false)
+		p = cli.newL1Peer(target, "XXX", false, false)
 	}
 
 	//log.Println("XXX ACCEPTING OFFER")
@@ -101,8 +108,12 @@ func newClient(ctx context.Context, url string) (*Client, error) {
 	}
 	cli.L1Peers = make(map[string]*L1Peer)
 	cli.L2Peers = make(map[string]*L2Peer)
+	cli.Keys = make(map[string][32]byte)
 	cli.pMu = &sync.RWMutex{}
 	cli.pL2Mu = &sync.RWMutex{}
+	cli.kMu = &sync.RWMutex{}
+	cli.Routes = make(map[string]*L1Peer) //XXX mutex?
+	cli.routeMu = &sync.RWMutex{}
 
 	return cli, nil
 }
@@ -152,22 +163,29 @@ func (c *Client) SearchL2(q string, lang string) {
 		Query: q,
 		Lang:  lang,
 	}
+	log.Printf("SearchL2 searching[%s]\n", q)
 	b, err := json.Marshal(m)
 	if err != nil {
-		log.Println("SearchL2", err)
+		log.Println("search", err)
 	}
-	c.pL2Mu.RLock()
-	for _, l2 := range c.L2Peers {
-		if l2.GW.dc.ReadyState() == webrtc.DataChannelStateOpen {
-			c.SendL2(l2, b)
-		} else {
-			fmt.Println(c.tid, "GW readyState is:", l2.GW.dc.ReadyState().String())
-			if l2.GW.dc.ReadyState() == webrtc.DataChannelStateClosed {
-				c.DeleteL2Peer(l2.Name)
-			}
-		}
+	if c.Circuits[0].State > 0 {
+		c.Circuits[0].Send(string(b))
 	}
-	c.pL2Mu.RUnlock()
+	// if err != nil {
+	// 	log.Println("SearchL2", err)
+	// }
+	// c.pL2Mu.RLock()
+	// for _, l2 := range c.L2Peers {
+	// 	if l2.GW.dc.ReadyState() == webrtc.DataChannelStateOpen {
+	// 		c.SendL2(l2, b)
+	// 	} else {
+	// 		fmt.Println(c.tid, "GW readyState is:", l2.GW.dc.ReadyState().String())
+	// 		if l2.GW.dc.ReadyState() == webrtc.DataChannelStateClosed {
+	// 			c.DeleteL2Peer(l2.Name)
+	// 		}
+	// 	}
+	// }
+	// c.pL2Mu.RUnlock()
 }
 
 func (c *Client) GetNL2Peers() int {
@@ -225,6 +243,7 @@ func (c *Client) DeleteL2Peer(name string) {
 }
 
 func (c *Client) AddL2Peer(l2 *L2Peer) {
+	fmt.Printf("[ADD L2 PEER][%s] %s\n", c.tid, l2.Name)
 	c.pL2Mu.Lock()
 	c.L2Peers[l2.Name] = l2
 	c.pL2Mu.Unlock()
@@ -255,7 +274,7 @@ func (c *Client) GetL2Peer(name string, gw *L1Peer, askKey bool) (*L2Peer, bool)
 		}
 		return l2, true
 	}
-	fmt.Println(c.tid, "L2", name, "not present yet")
+	//fmt.Println(c.tid, "L2", name, "not present yet")
 	l2 = &L2Peer{
 		Name:       name,
 		PK:         [32]byte{},
@@ -272,8 +291,7 @@ func (c *Client) GetL2Peer(name string, gw *L1Peer, askKey bool) (*L2Peer, bool)
 		}
 		JSONSuccessSend(c, in)
 	}
-
-	return l2, false
+	return l2, true
 }
 
 func (c *Client) DecodeL2Msg(l2 *L2Peer, emsg string) ([]byte, bool) {
@@ -293,30 +311,50 @@ func (c *Client) DecodeL2Msg(l2 *L2Peer, emsg string) ([]byte, bool) {
 	return decrypted, true
 }
 
+func isZero(a []byte, n int) bool {
+	return false
+}
+
 func (c *Client) HandleL2Msg(gw *L1Peer, data []byte) {
 	m := FwdMsg{}
 	json.Unmarshal(data, &m)
 	l2, ok := c.GetL2Peer(m.Ori, gw, true)
 	if !ok {
-		fmt.Println("[IGNORED]", c.tid, "L2 msg from", m.Ori)
+		fmt.Printf("[MISSING L2 PEER][%s] %s\n", c.tid, m.Ori)
 		return
+	} else {
+		fmt.Printf("[PRESENT L2 PEER][%s] %s\n", c.tid, m.Ori)
 	}
+	//fmt.Printf("[%s] KEY [%b]\n", c.tid, l2.K)
+	failure := 0
+RETRY:
+	//XXX check if PK? K?
 	b, ok := c.DecodeL2Msg(l2, m.Msg)
 	if !ok {
+		failure++
+		if failure < 3 {
+			fmt.Printf("[%s] wait for key\n", c.tid)
+			time.Sleep(3 * time.Second)
+			goto RETRY
+		}
 		return
 	}
 	dm := L2Msg{}
 	json.Unmarshal(b, &dm)
 	switch dm.Type {
+	case "fwd":
+		fmt.Println("fwd", dm)
+		//m := L2Msg{}
 	case "search":
 		fmt.Println("search", dm)
+		log.Println(c.tid, "search as browser?", c.Browser)
 		m := L2Msg{
 			Type:  "resp",
 			Query: dm.Query,
 			//Text:  []string{dm.Query, "prova1", "prova2", "prova3"},
 		}
 		if c.Searcher != nil {
-			c.Searcher(l2.Name, dm.Query, dm.Lang)
+			c.Searcher(c, l2.Name, dm.Query, dm.Lang, "", "")
 		}
 		b, err := json.Marshal(m)
 		if err != nil {
@@ -330,8 +368,14 @@ func (c *Client) HandleL2Msg(gw *L1Peer, data []byte) {
 			return
 		}
 	case "resp":
+		if c.Responder != nil {
+			c.Responder(c, string(b))
+		} else {
+			log.Println("Responder not implemented")
+		}
+		log.Println(dm)
 		for _, s := range dm.Text {
-			fmt.Println(s)
+			fmt.Println("XXX", s)
 		}
 	}
 }
@@ -421,13 +465,17 @@ func (cli *Client) userlistHandler(cell *Cell) {
 	if cli.PeerIsPresent(user.D0) {
 		return
 	}
+	exit := false
+	//log.Println("I AM NOT THE INITIATOR")
+	if user.D2 == "e" {
+		exit = true
+	}
 	if cell.D0 != "1" {
-		//log.Println("I AM NOT THE INITIATOR")
-		cli.newL1Peer(user.D0, user.D1, false)
+		cli.newL1Peer(user.D0, user.D1, false, exit)
 		return
 	}
 	//log.Println("CREATE user:", user.D0, "alias:", user.D1)
-	go cli.CreateOffer(user.D0, user.D1)
+	go cli.CreateOffer(user.D0, user.D1, exit)
 }
 
 func (cli *Client) ws_loop() {
@@ -444,18 +492,43 @@ func (cli *Client) ws_loop() {
 			case "userlist":
 				go cli.userlistHandler(&aaa)
 			case "pong":
-				//log.Println("pong")
+			//log.Println("pong")
+			case "guard": //receiving a guard peer?
+				log.Println("Guard:", aaa.D0)
+				cli.Circuits[0].Guard.ID = aaa.D0
+				go cli.newL1Peer(aaa.D0, "", true, false)
+			case "bridge":
+				log.Println("Bridge:", aaa.D0)
+				cli.Circuits[0].Bridge.ID = aaa.D0
+			case "exit":
+				log.Println("Exit:", aaa.D0)
+				cli.Circuits[0].Exit.ID = aaa.D0
 			case "offer":
+				fmt.Printf("Offer from %s received\n", aaa.D0)
+				//fmt.Println(aaa.D2)
 				//D0 target D1 D2 sdp
 				go cli.AcceptOffer(aaa.D0, aaa.D2)
 				//log.Println(p.pc)
 				//log.Println(p.dc)
 				//log.Println("p.dc.ReadyState:", p.dc.ReadyState().String())
 			case "answer":
+				fmt.Printf("Answer from %s received\n", aaa.D0)
+				//fmt.Println(aaa.D2)
 				go cli.AcceptAnswer(aaa.D0, aaa.D2)
 				//log.Println(p.pc)
 				//log.Println(p.dc)
 				//log.Println("p.dc.ReadyState:", p.dc.ReadyState().String())
+			case "k":
+				k, err := b64.StdEncoding.DecodeString(aaa.D1)
+				if err == nil {
+					var k32 [32]byte
+					copy(k32[:], k)
+					cli.kMu.Lock()
+					cli.Keys[aaa.D0] = k32
+					//k3 := cli.Keys[aaa.D0]
+					cli.kMu.Unlock()
+					//fmt.Println("new key:", b64.StdEncoding.EncodeToString(k3[:]))
+				}
 			case "key":
 				l2, _ := cli.GetL2Peer(aaa.D0, nil, false)
 				b, err := b64.StdEncoding.DecodeString(aaa.D1)
@@ -500,6 +573,16 @@ func (cli *Client) KeepAlive(interval time.Duration) {
 	}
 }
 
+func (cli *Client) JCell(cell string) {
+	var in Cell
+	err := json.Unmarshal([]byte(cell), &in)
+	assertSuccess(err)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	err = wsjson.Write(ctx, cli.c, in)
+	assertSuccess(err)
+	cancel()
+}
+
 func (cli *Client) SingleCmd(cmd string) {
 	var in Cell
 	in.Type = cmd
@@ -516,6 +599,7 @@ func Dial(addr string) *Client {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	cli, err := newClient(ctx, addr)
+	cli.Browser = true
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -526,7 +610,37 @@ func Dial(addr string) *Client {
 	cancel()
 
 	var out Cell
-	in := Cell{Type: "gettid", D0: d0, D1: "mid-only"}
+	in := Cell{Type: "gettid", D0: d0, D1: "e,g"}
+	JSONSuccessExchange(cli, in, &out)
+	//log.Println(out)
+	cli.tid = out.D0
+	fmt.Println("tid:", cli.tid)
+	//tkid := out.D1
+
+	go cli.ws_loop()
+
+	return cli
+}
+
+func DialMiddle(addr string) *Client {
+	senderPublicKey, senderPrivateKey, err := box.GenerateKey(crand.Reader)
+	if err != nil {
+		fmt.Println("Dial: unable to generate keys")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	cli, err := newClient(ctx, addr)
+	cli.Browser = false
+	if err != nil {
+		log.Fatal(err)
+	}
+	copy(cli.PrivK[:], senderPrivateKey[:32])
+	copy(cli.PK[:], senderPublicKey[:32])
+	d0 := b64.StdEncoding.EncodeToString(cli.PK[:32])
+
+	cancel()
+
+	var out Cell
+	in := Cell{Type: "gettid", D0: d0, D1: "g,b"}
 	JSONSuccessExchange(cli, in, &out)
 	//log.Println(out)
 	cli.tid = out.D0

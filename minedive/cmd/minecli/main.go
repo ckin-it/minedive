@@ -2,8 +2,13 @@ package main
 
 import (
 	"bufio"
+	b64 "encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"log"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"strings"
 	"time"
@@ -18,7 +23,15 @@ var avoid []string
 
 func init() {
 	lineChan = make(chan string)
-	flag.StringVar(&bootstrap, "bootstrap", "wss://localhost:6501/", "bootstrapserver")
+	flag.StringVar(&bootstrap, "bootstrap", "ws://localhost:6501/ws", "bootstrapserver")
+}
+
+func r(c *minedive.Client, a string) {
+	var res minedive.L2Msg
+	json.Unmarshal([]byte(a), &res)
+	for _, v := range res.Text {
+		fmt.Println(">", v)
+	}
 }
 
 func cmdDispatcher(c chan<- string) {
@@ -82,16 +95,64 @@ func cmdLoop(c <-chan string) {
 					}
 				case "join":
 					mineClient = minedive.Dial(bootstrap)
-					go mineClient.KeepAlive(5 * time.Second)
+					fmt.Println(b64.StdEncoding.EncodeToString(mineClient.PK[:]))
+					var cell minedive.Cell
+					cell.Type = "pubk"
+					cell.D0 = b64.StdEncoding.EncodeToString(mineClient.PK[:])
+					minedive.JSONSuccessSend(mineClient, cell)
+					go mineClient.KeepAlive(60 * time.Second)
 				case "wsping":
 					mineClient.SingleCmd("ping")
 				case "cmd":
 					if cmd[1] != "" {
 						mineClient.SingleCmd(cmd[1])
 					}
+				case "wsraw":
+					if cmd[1] != "" {
+						mineClient.JCell(cmd[1])
+					}
+				case "circuit":
+					fmt.Println("circuit invoked with cmd:", len(cmd))
+					if len(cmd) == 4 {
+						var err error
+						circuit, err := mineClient.NewCircuit()
+						if err != nil {
+							log.Println(err)
+						} else {
+							fmt.Println("invoking setup circuit")
+							circuit.SetupCircuit(cmd[1], cmd[2], cmd[3])
+						}
+					}
+				case "testcirc":
+					mineClient = minedive.Dial(bootstrap)
+					mineClient.Responder = r
+					fmt.Println(b64.StdEncoding.EncodeToString(mineClient.PK[:]))
+					_, err := mineClient.NewCircuit()
+					if err != nil {
+						log.Println(err)
+					}
+					time.Sleep(1 * time.Second)
+					mineClient.Circuits[0].Send("{\"type\":\"test\"}")
+
+				case "testcirc2":
+					mineClient.Circuits[0].Send("{\"type\":\"test\"}")
+				case "searchv2":
+					if len(cmd) == 2 {
+						msg := fmt.Sprintf("{\"type\":\"search\",\"q\":\"%s\",\"lang\":\"it\"}", cmd[1])
+						mineClient.Circuits[0].Send(msg)
+					}
+				case "raw":
+					if cmd[1] != "" && cmd[2] != "" {
+						p, ok := mineClient.GetPeer(cmd[1])
+						if ok {
+							p.Msg(cmd[2])
+						}
+					}
 				case "list":
 					mineClient.ListL1Peers()
 					mineClient.ListL2Peers()
+				case "listip":
+					mineClient.ListL1Peers()
 				case "getpeers":
 					mineClient.SingleCmd("getpeers")
 				case "quit":
@@ -105,6 +166,9 @@ func cmdLoop(c <-chan string) {
 
 func main() {
 	flag.Parse()
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6600", nil))
+	}()
 	go cmdDispatcher(lineChan)
 	cmdLoop(lineChan)
 }

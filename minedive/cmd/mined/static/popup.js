@@ -2,9 +2,7 @@ window.browser = window.chrome || window.browser || window.msBrowser;
 let bkg = browser.extension.getBackgroundPage();
 let log = bkg.console.log;
 let q = '';
-var port = browser.runtime.connect();
 document.r = [];
-
 search_pb = document.getElementById('search-pb');
 search_pb.onclick = function(element) {
   var newURL = browser.runtime.getURL('/ui/search.html');
@@ -17,11 +15,6 @@ options_pb.onclick = function(element) {
   var newURL = browser.runtime.getURL('/ui/options.html');
   log(newURL);
   browser.tabs.create({ url: newURL});
-}
-
-circuit_pb = document.getElementById('circuit-pb');
-circuit_pb.onclick = function(element) {
-  port.postMessage({type: 'new-circuit'});
 }
 
 var port = browser.runtime.connect();
