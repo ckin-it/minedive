@@ -76,7 +76,10 @@ func (m *Client) ReplyCircuit(msg string, eKey string, eNonce string) {
 		log.Println(err)
 		return
 	}
-	p.dc.SendText(string(b))
+	err = p.dc.SendText(string(b))
+	if err != nil {
+		log.Printf("ReplyCircuit %s failed\n", eKey)
+	}
 }
 
 func (c *Circuit) Send(msg string) {

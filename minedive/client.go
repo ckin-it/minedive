@@ -62,9 +62,13 @@ func (cli *Client) AcceptOffer(target string, sdp string) {
 	p.pc.SetRemoteDescription(desc)
 
 	answer, err := p.pc.CreateAnswer(nil)
-	assertSuccess(err)
-	err = p.pc.SetLocalDescription(answer)
-	assertSuccess(err)
+	if err != nil {
+		log.Println("AcceptOffer CreateAnswer failed", err)
+	}
+	err = p.pc.SetLocalDescription(answer) //XXX
+	if err != nil {
+		log.Println("AcceptOffer SetLocalDescription failed", err)
+	}
 	<-p.gatherComplete
 }
 
@@ -425,23 +429,23 @@ func (c *Client) AddPeer(p *L1Peer) bool {
 	return !ok
 }
 
-func assertSuccess(err error) {
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
 func JSONSuccessSend(cl *Client, in Cell) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	err := wsjson.Write(ctx, cl.c, in)
-	assertSuccess(err)
+	if err != nil {
+		log.Println("JSON Send failed", err)
+	}
 	cancel()
 }
 
 func JSONSuccessExchange(cl *Client, in Cell, out *Cell) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	err := wsjson.Write(ctx, cl.c, in)
-	assertSuccess(err)
+	if err != nil {
+		log.Println("JSON Exchange failed", err)
+		cancel()
+		return
+	}
 	cancel()
 	ctx, cancel = context.WithTimeout(context.Background(), time.Second*30)
 	err = wsjson.Read(ctx, cl.c, out)
@@ -456,12 +460,18 @@ func (cli *Client) userlistHandler(cell *Cell) {
 	var user Cell
 	//log.Println(cell)
 	a, err := b64.StdEncoding.DecodeString(cell.D1)
-	assertSuccess(err) //XXX debug
+	if err != nil {
+		log.Println("userlistHandler DecodeString failed", err)
+		return
+	}
 	if len(a) <= 0 {
 		return
 	}
 	err = json.Unmarshal(a, &user)
-	assertSuccess(err) //XXX debug
+	if err != nil {
+		log.Println("userlistHandler Unmarshal failed", err)
+		return
+	}
 	if cli.PeerIsPresent(user.D0) {
 		return
 	}
@@ -525,9 +535,8 @@ func (cli *Client) ws_loop() {
 					copy(k32[:], k)
 					cli.kMu.Lock()
 					cli.Keys[aaa.D0] = k32
-					//k3 := cli.Keys[aaa.D0]
 					cli.kMu.Unlock()
-					//fmt.Println("new key:", b64.StdEncoding.EncodeToString(k3[:]))
+					//fmt.Println("new key:", b64.StdEncoding.EncodeToString(k32[:]))
 				}
 			case "key":
 				l2, _ := cli.GetL2Peer(aaa.D0, nil, false)
@@ -560,7 +569,10 @@ func (cli *Client) ping() {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 		err := wsjson.Write(ctx, cli.c, in)
-		assertSuccess(err)
+		if err != nil {
+			log.Println("Client Ping write failed", err)
+			//XXX fix peer
+		}
 		cancel()
 		time.Sleep(10 * time.Second)
 	}
@@ -576,10 +588,17 @@ func (cli *Client) KeepAlive(interval time.Duration) {
 func (cli *Client) JCell(cell string) {
 	var in Cell
 	err := json.Unmarshal([]byte(cell), &in)
-	assertSuccess(err)
+	if err != nil {
+		log.Println("JCell Unmarshall failed", err)
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	err = wsjson.Write(ctx, cli.c, in)
-	assertSuccess(err)
+	if err != nil {
+		log.Println("JCell Write failed", err)
+		cancel()
+		return
+	}
 	cancel()
 }
 
@@ -588,7 +607,9 @@ func (cli *Client) SingleCmd(cmd string) {
 	in.Type = cmd
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	err := wsjson.Write(ctx, cli.c, in)
-	assertSuccess(err)
+	if err != nil {
+		log.Println("SingleCmd Write failed", err)
+	}
 	cancel()
 }
 
@@ -616,6 +637,56 @@ func Dial(addr string) *Client {
 	cli.tid = out.D0
 	fmt.Println("tid:", cli.tid)
 	//tkid := out.D1
+
+	go cli.ws_loop()
+
+	return cli
+}
+
+type DialOptions struct {
+	D0              string
+	D1              string
+	PublicKey       *[32]byte
+	PrivateKey      *[32]byte
+	ClientIsBrowser bool
+}
+
+func DialOpts(addr string, opts *DialOptions) *Client {
+	var senderPublicKey *[32]byte
+	var senderPrivateKey *[32]byte
+	var err error
+	var d0 string
+
+	if opts.PublicKey == nil || opts.PrivateKey == nil {
+		senderPublicKey, senderPrivateKey, err = box.GenerateKey(crand.Reader)
+		if err != nil {
+			fmt.Println("Dial: unable to generate keys")
+		}
+	} else {
+		senderPublicKey = opts.PublicKey
+		senderPrivateKey = opts.PrivateKey
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	cli, err := newClient(ctx, addr)
+	cli.Browser = true
+	if err != nil {
+		log.Fatal(err)
+	}
+	copy(cli.PrivK[:], senderPrivateKey[:32])
+	copy(cli.PK[:], senderPublicKey[:32])
+	if opts.D0 == "" {
+		d0 = b64.StdEncoding.EncodeToString(cli.PK[:32])
+	} else {
+		d0 = opts.D0
+	}
+
+	cancel()
+
+	var out Cell
+	in := Cell{Type: "gettid", D0: d0, D1: opts.D1}
+	JSONSuccessExchange(cli, in, &out)
+	cli.tid = out.D0
+	fmt.Println("tid:", cli.tid)
 
 	go cli.ws_loop()
 

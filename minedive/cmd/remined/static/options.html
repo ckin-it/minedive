@@ -1,0 +1,32 @@
+ <!DOCTYPE html>
+<html>
+<head>
+  <title>Minedive - options</title>
+  <link rel="stylesheet" href="minedive.css">
+</head>
+<body>
+<div class="wrapper">
+<h2>Minedive options</h2>
+<form>
+  <div role="option">
+  <label class="search-label" for="staticID">Static ID<p id="error" role="alert"></p></label>
+  <input class="search-input" type="text" id="staticID">
+  <label class="search-label" for="minL1">Minimum number of L1 peers<p id="error" role="alert"></p></label>
+  <input class="search-input" type="text" id="minL1">
+  <label class="search-label" for="minL1">Minimum number of L2 peers<p id="error" role="alert"></p></label>
+  <input class="search-input" type="text" id="minL2">
+  <label class="search-label" for="ws_server">Minedive bootstrap server<p id="error" role="alert"></p></label>
+  <input class="search-input" type="text" id="ws_server">
+  <label class="search-label" for="community">Community ID<p id="error" role="alert"></p></label>
+  <input class="search-input" type="text" id="community">
+  <label class="search-label" for="stun">STUN/TURN server<p id="error" role="alert"></p></label>
+  <textarea rows="1" class="search-input" type="text" id="stun"></textarea>
+  <button class="button" type="button" id="apply">Save & Apply</button>
+  <button class="button" type="button" id="restore">Restore defaults</button>
+</div>
+</form>
+</div>
+<script src="/ui/options.js"></script>
+<script src="/core/conf.js"></script>
+</body>
+</html>

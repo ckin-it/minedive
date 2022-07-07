@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"strings"
@@ -24,6 +23,22 @@ var avoid []string
 func init() {
 	lineChan = make(chan string)
 	flag.StringVar(&bootstrap, "bootstrap", "ws://localhost:6501/ws", "bootstrapserver")
+}
+
+//cli, encMsg.Key, m.Query, m.Lang, encMsg.Key, encMsg.Nonce
+func s(m *minedive.Client, peer string, q string, lang string, key string, nonce string) {
+	msg := minedive.L2Msg{
+		Type:  "respv2",
+		Query: q,
+		Text:  []string{"I AM NOT A BROWSER", "https://example.com", "http://example.com/", "https://example.com/", "https://nlnet.nl/", "https://quitelongexampleurlusefulfortesting.com/sdjioasjg/asjpdaihj90arfau0094/shdga9ohfgaufhahoigdfa/"},
+	}
+	b, err := json.Marshal(msg)
+	if err != nil {
+		log.Println("HandleL2 Resp Marshal:", err)
+		return
+	}
+	_ = b
+	m.ReplyCircuit(string(b), key, nonce)
 }
 
 func r(c *minedive.Client, a string) {
@@ -96,16 +111,24 @@ func cmdLoop(c <-chan string) {
 				case "join":
 					mineClient = minedive.Dial(bootstrap)
 					fmt.Println(b64.StdEncoding.EncodeToString(mineClient.PK[:]))
+					mineClient.Searcher = s
 					var cell minedive.Cell
 					cell.Type = "pubk"
 					cell.D0 = b64.StdEncoding.EncodeToString(mineClient.PK[:])
 					minedive.JSONSuccessSend(mineClient, cell)
-					go mineClient.KeepAlive(60 * time.Second)
+					go mineClient.KeepAlive(20 * time.Second)
 				case "wsping":
 					mineClient.SingleCmd("ping")
 				case "cmd":
 					if cmd[1] != "" {
 						mineClient.SingleCmd(cmd[1])
+					}
+				case "getk":
+					if cmd[1] != "" {
+						var cell minedive.Cell
+						cell.Type = "getk"
+						cell.D0 = cmd[1]
+						minedive.JSONSuccessSend(mineClient, cell)
 					}
 				case "wsraw":
 					if cmd[1] != "" {
@@ -133,6 +156,7 @@ func cmdLoop(c <-chan string) {
 					}
 					time.Sleep(1 * time.Second)
 					mineClient.Circuits[0].Send("{\"type\":\"test\"}")
+					go mineClient.KeepAlive(20 * time.Second)
 
 				case "testcirc2":
 					mineClient.Circuits[0].Send("{\"type\":\"test\"}")
@@ -167,7 +191,7 @@ func cmdLoop(c <-chan string) {
 func main() {
 	flag.Parse()
 	go func() {
-		log.Println(http.ListenAndServe("localhost:6600", nil))
+		//log.Println(http.ListenAndServe("localhost:6600", nil))
 	}()
 	go cmdDispatcher(lineChan)
 	cmdLoop(lineChan)

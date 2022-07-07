@@ -4,7 +4,6 @@ import (
 	"context"
 	crand "crypto/rand"
 	b64 "encoding/base64"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -128,6 +127,30 @@ func (s *MinediveServer) DelGuard(cliName string) {
 	s.guardsRWMutex.Unlock()
 }
 
+func (s *MinediveServer) GetExits() []string {
+	s.exitsRWMutex.RLock()
+	o := make([]string, len(s.exits))
+	i := 0
+	for k := range s.exits {
+		o[i] = k
+		i++
+	}
+	s.exitsRWMutex.RUnlock()
+	return o
+}
+
+func (s *MinediveServer) GetGuards() []string {
+	s.guardsRWMutex.RLock()
+	o := make([]string, len(s.guards))
+	i := 0
+	for k := range s.guards {
+		o[i] = k
+		i++
+	}
+	s.guardsRWMutex.RUnlock()
+	return o
+}
+
 func (s *MinediveServer) GetGuard(avoid map[string]bool) (cli *MinediveClient, err error) {
 	cli = nil
 	s.guardsRWMutex.RLock()
@@ -159,21 +182,6 @@ func (s *MinediveServer) GetGuard(avoid map[string]bool) (cli *MinediveClient, e
 		return nil, errors.New("no guards available")
 	}
 	return cli, nil
-}
-
-//GetRandomName is ...
-func GetRandomName(id uint64, sseed string) string {
-	bid := make([]byte, 8)
-	binary.LittleEndian.PutUint64(bid, id)
-	token := make([]byte, 24)
-	rand.Seed(time.Now().UnixNano())
-	rand.Read(token)
-	for i, v := range sseed {
-		token[i] ^= byte(v)
-	}
-	//token = append(token, bid...)
-	r := b64.StdEncoding.EncodeToString(token)
-	return r
 }
 
 func (s *MinediveServer) MinediveAccept(w http.ResponseWriter, r *http.Request) {

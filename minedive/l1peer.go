@@ -50,7 +50,10 @@ func L1peerPing(cli *Client, p *L1Peer) {
 		now := time.Now()
 		a.Text = fmt.Sprintf("%d", now.UnixNano())
 		b, err := json.Marshal(a)
-		assertSuccess(err)
+		if err != nil {
+			log.Println("L1peerPing marshal failed:", err)
+			return
+		}
 		err = p.dc.SendText(string(b))
 		if err != nil {
 			log.Println("SendText", err)
@@ -134,7 +137,7 @@ func (cli *Client) DecL1Msg(p *L1Peer, msg webrtc.DataChannelMessage) {
 			return
 		}
 		if bytes.Compare(tpk, cli.PK[:]) != 0 {
-			log.Println("target key not found, discarded")
+			log.Printf("target key [%s] not found, discarded", m.TPK)
 			return
 		}
 		nonce, err := b64.StdEncoding.DecodeString(m.Nonce)
@@ -174,12 +177,9 @@ func (cli *Client) handleL1Msg(p *L1Peer, msg webrtc.DataChannelMessage, encMsg 
 	json.Unmarshal(msg.Data, &m)
 	//fmt.Printf("MSG [%s] FROM [%s]\n", m.Type, p.Name)
 	switch m.Type {
-	case "ey":
-		p.Exit = true
-	case "en":
-		p.Exit = false
 	case "search":
 		if encMsg == nil {
+			log.Println("direct search, discarded")
 			return
 		}
 		m := L2Msg{}
@@ -200,23 +200,9 @@ func (cli *Client) handleL1Msg(p *L1Peer, msg webrtc.DataChannelMessage, encMsg 
 			log.Println(cli.tid, "HandleL2 Resp SendL2:", err)
 			return
 		}
-	case "e?":
-		if cli.Browser {
-			m.Type = "ey"
-		} else {
-			m.Type = "en"
-		}
-		m.From = cli.tid
-		b, err := json.Marshal(m)
-		assertSuccess(err)
-		err = p.dc.SendText(string(b))
-		assertSuccess(err) //XXX debug
 	case "respv2":
 		m := L2Msg{}
 		json.Unmarshal(msg.Data, &m)
-		// for _, s := range m.Text {
-		// 	fmt.Println("XXX", s)
-		// }
 		if cli.Responder != nil {
 			log.Println("RESPONDER TRIGGERED")
 			cli.Responder(cli, string(msg.Data))
@@ -226,16 +212,28 @@ func (cli *Client) handleL1Msg(p *L1Peer, msg webrtc.DataChannelMessage, encMsg 
 	case "connect":
 		m := FwdMsg{}
 		json.Unmarshal(msg.Data, &m)
-		go cli.newL1Peer(m.To, "", true, false)
+		_, ok := cli.GetPeer(m.To)
+		if !ok {
+			go cli.newL1Peer(m.To, "", true, false)
+			return
+		}
+		log.Printf("connection to %s available, connect discarded\n", m.To)
 	case "ping":
 		pingMsg := pingL1Msg{}
 		json.Unmarshal(msg.Data, &pingMsg)
 		pingMsg.Type = "pong"
 		pingMsg.From = cli.tid
 		b, err := json.Marshal(pingMsg)
-		assertSuccess(err)
+		if err != nil {
+			log.Println("marshal failed, message discarded", err)
+			return
+		}
 		err = p.dc.SendText(string(b))
-		assertSuccess(err) //XXX debug
+		if err != nil {
+			log.Println("send failed, message discarded", err)
+			log.Println("ready state?", p.dc.ReadyState().String())
+			return
+		}
 	case "pong":
 		m := pingL1Msg{}
 		json.Unmarshal(msg.Data, &m)
@@ -263,10 +261,15 @@ func (cli *Client) handleL1Msg(p *L1Peer, msg webrtc.DataChannelMessage, encMsg 
 		}
 		//XXX should I and could I trigger ask key?
 		b, err := json.Marshal(m)
-		assertSuccess(err)
-		//fmt.Println("L2 msg sending:", m)
+		if err != nil {
+			log.Println("getl2 marshal failed", err)
+			return
+		}
 		err = p.dc.SendText(string(b))
-		assertSuccess(err) //XXX debug
+		if err != nil {
+			log.Println("getl2 send failed", err)
+			return
+		}
 	case "test":
 		log.Println(cli.tid, "TEST MSG RECEIVED")
 		cli.ReplyCircuit("{\"type\":\"test2\"}", encMsg.Key, encMsg.Nonce)
@@ -306,8 +309,15 @@ func (cli *Client) handleL1Msg(p *L1Peer, msg webrtc.DataChannelMessage, encMsg 
 		m.Ori = p.Alias
 		m.To = next.Name
 		b, err := json.Marshal(m)
-		assertSuccess(err)
-		next.dc.SendText(string(b))
+		if err != nil {
+			log.Println("fwd marshal failed", err)
+			return
+		}
+		err = next.dc.SendText(string(b))
+		if err != nil {
+			log.Println("fwd send failed", err)
+			return
+		}
 	case "l2":
 		var m L2L1Msg
 		var askKey bool
@@ -337,7 +347,10 @@ func (cli *Client) newL1Peer(name string, alias string, initiator bool, exit boo
 	p.Exit = exit
 	//p.rtcConfig = rtcConfig
 	pc, err := webrtc.NewPeerConnection(rtcConfig)
-	assertSuccess(err)
+	if err != nil {
+		log.Println("newL1Peer NewPeerConnection failed", err)
+		return
+	}
 	p.gatherComplete = make(chan struct{})
 	p.dataChanOpen = make(chan struct{})
 
@@ -357,7 +370,6 @@ func (cli *Client) newL1Peer(name string, alias string, initiator bool, exit boo
 	//})
 
 	pc.OnICECandidate(func(ice *webrtc.ICECandidate) {
-		//log.Println("ICE", ice)
 		//nil candidate means we collected all candidates
 		if ice == nil {
 			if initiator {
@@ -371,14 +383,11 @@ func (cli *Client) newL1Peer(name string, alias string, initiator bool, exit boo
 					//log.Println("responder ice finished, closing gatherChannel", cli.tid, name)
 					sdp := pc.LocalDescription().SDP
 					in := Cell{D0: cli.tid, D1: name, D2: sdp}
-					//log.Println("XXX ANSWER:", sdp)
 					in.Type = "answer"
 					JSONSuccessSend(cli, in)
 					close(p.gatherComplete)
 				}
 			}
-		} else {
-			//log.Println("ICE details:", ice.Typ, ice.Address)
 		}
 	})
 
@@ -438,16 +447,15 @@ func (cli *Client) newL1Peer(name string, alias string, initiator bool, exit boo
 		}
 		err = pc.SetLocalDescription(offer) //XXX THIS STARTS ICE
 		if err != nil {
-			log.Fatal(err)
+			log.Println("NewL1Peer SetLocalDescription failed", err)
 		}
-		<-p.gatherComplete
+		<-p.gatherComplete //XXX benchmark this
 		cell := Cell{}
 		cell.Type = offer.Type.String()
-		cell.D0 = cli.tid //me, from
-		cell.D1 = name    //you, target
-		cell.D2 = offer.SDP
+		cell.D0 = cli.tid                   //me, from
+		cell.D1 = name                      //you, target
+		cell.D2 = pc.LocalDescription().SDP //XXX instead of initial offer
 		JSONSuccessSend(cli, cell)
-		assertSuccess(err)
 	}
 	p.pc = pc
 	cli.AddPeer(p)

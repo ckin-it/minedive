@@ -54,7 +54,7 @@ func main() {
 	for i := 0; i < n; i++ {
 		m[i] = minedive.DialMiddle(bootstrap)
 		m[i].Searcher = fakeSearch
-		go m[i].KeepAlive(30 * time.Second)
+		go m[i].KeepAlive(20 * time.Second)
 		go func(j int) {
 			var cell minedive.Cell
 			cell.Type = "pubk"
