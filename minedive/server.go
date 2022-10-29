@@ -92,7 +92,7 @@ func (s *MinediveServer) GetExit(avoid map[string]bool) (cli *MinediveClient, er
 			_, ok := avoid[cn]
 			if ok == false {
 				cli = s.exits[cn]
-				break
+				goto UNLOCK
 			}
 		}
 		i++
@@ -103,11 +103,12 @@ func (s *MinediveServer) GetExit(avoid map[string]bool) (cli *MinediveClient, er
 			_, ok := avoid[cn]
 			if ok == false {
 				cli = s.exits[cn]
-				break
+				goto UNLOCK
 			}
 		}
 		i++
 	}
+UNLOCK:
 	s.exitsRWMutex.RUnlock()
 	if cli == nil {
 		return nil, errors.New("no exits available")
@@ -161,7 +162,7 @@ func (s *MinediveServer) GetGuard(avoid map[string]bool) (cli *MinediveClient, e
 			_, ok := avoid[cn]
 			if ok == false {
 				cli = s.guards[cn]
-				break
+				goto UNLOCK
 			}
 		}
 		i++
@@ -172,11 +173,12 @@ func (s *MinediveServer) GetGuard(avoid map[string]bool) (cli *MinediveClient, e
 			_, ok := avoid[cn]
 			if ok == false {
 				cli = s.guards[cn]
-				break
+				goto UNLOCK
 			}
 		}
 		i++
 	}
+UNLOCK:
 	s.guardsRWMutex.RUnlock()
 	if cli == nil {
 		return nil, errors.New("no guards available")

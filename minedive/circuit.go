@@ -25,15 +25,17 @@ type Node struct {
 }
 
 type Circuit struct {
-	CircuitID string
-	DC        *webrtc.DataChannel
-	State     int
-	Guard     Node
-	Bridge    Node
-	Exit      Node
-	PubK      [32]byte
-	PrivK     [32]byte
-	m         *Client
+	CircuitID    string
+	DC           *webrtc.DataChannel
+	State        string
+	Guard        Node
+	Bridge       Node
+	Exit         Node
+	PubK         [32]byte
+	PrivK        [32]byte
+	m            *Client
+	Notification chan string
+	CircuitEvent chan string
 }
 
 //needed: nonce, e.Key
@@ -320,11 +322,11 @@ SENDTEST:
 WAITTEST:
 	log.Println(c.State)
 	switch c.State {
-	case 1000:
+	case "OK":
 		log.Println("OK CIRCUIT")
 		return
 	default:
-		log.Printf("Circuit %s State [%d]", c.CircuitID, c.State)
+		log.Printf("Circuit %s State [%s]", c.CircuitID, c.State)
 	}
 	if failedWait < 5 {
 		failedWait++
@@ -381,4 +383,11 @@ FIND_EXIT:
 	c.Guard.Peer = gu
 	c.Guard.ID = gu.Name
 	return c
+}
+
+func (m *Circuit) StateOK() bool {
+	if m.State == "OK" {
+		return true
+	}
+	return false
 }

@@ -63,7 +63,12 @@ func minediveDispatch(cli *minedive.MinediveClient, m minedive.Cell) {
 			log.Println("error gettid", err)
 			return
 		}
-		copy(cli.PublicKey[:], b64pk[:32])
+		if len(b64pk) == 32 {
+			copy(cli.PublicKey[:], b64pk[:32])
+		} else {
+			log.Printf("error gettid: wrong key len[%d]\n", len(b64pk))
+			return
+		}
 		cli.Name = minedive.GetRandomName(fnvhash(cli.ID), "stan")
 		attrs := strings.Split(m.D1, ",")
 		for _, attr := range attrs {

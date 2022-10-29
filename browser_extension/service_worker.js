@@ -1,20 +1,17 @@
 let connectedPorts = [];
-
-chrome.runtime
+let result;
+let options;
 
 chrome.runtime.onConnect.addListener(function(port) {
   connectedPorts.push(port);
-  log("connecting new port [", connectedPorts.length, "]");
   port.onMessage.addListener( function(msg) {
-    log("port print:", msg);
     switch(msg.type) {
       case 'status':
-        let peers_number_l1 = MinediveGetNL1(); //XXX fix this
-        let peers_number_l2 = MinediveGetNL2();
-        let status_log = "it's all good man";
-        //let peers_number_l1 = Object.keys(l1_peers).length;
-        //let peers_number_l2 = Object.keys(l2_peers).length;
-        port.postMessage({type: "status", text: status_log, l1: peers_number_l1, l2: peers_number_l2});
+        if (!restartGoIfExited()) {          
+          let minediveState = MinediveGetState(); //XXX fix this
+          let circuitState = MinediveGetCircuitState();
+          port.postMessage({type: "status", text: minediveState, l1: circuitState, l2: ""});
+        }
         break;
       case 'get_options':
         console.log('get_options received');
@@ -68,9 +65,20 @@ async function init(options) {
   log("init done");
 }
 
+function restartGoIfExited() {
+  if (go.exited) {
+    init(options);
+    port.postMessage({type: "status", text: "Restarting extension"});
+    return true;
+  }
+  return false;
+}
+
 // entry points
 chrome.storage.local.get(['options'], function(result) {
   if(result['options']) options = result['options'];
   else options = default_options;
   init(options);
 });
+
+setInterval(restartGoIfExited, 120000);

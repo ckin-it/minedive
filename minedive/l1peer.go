@@ -37,6 +37,7 @@ type L1Peer struct {
 	dataChanOpen   chan struct{}
 	Exit           bool
 	K              [32]byte
+	SDP            string
 }
 
 func (p *L1Peer) Msg(msg string) error {
@@ -275,7 +276,7 @@ func (cli *Client) handleL1Msg(p *L1Peer, msg webrtc.DataChannelMessage, encMsg 
 		cli.ReplyCircuit("{\"type\":\"test2\"}", encMsg.Key, encMsg.Nonce)
 	case "test2":
 		log.Println(cli.tid, "REPLY TEST MSG RECEIVED")
-		cli.Circuits[0].State = 1000
+		cli.Circuits[0].State = "OK"
 	case "fwd2":
 		m := FwdMsg{}
 		json.Unmarshal(msg.Data, &m)
@@ -337,7 +338,11 @@ func (cli *Client) handleL1Msg(p *L1Peer, msg webrtc.DataChannelMessage, encMsg 
 	}
 }
 
-// newL1Peer is the creator
+func (cli *Client) NewL1Peer(name string, alias string, initiator bool, exit bool) (p *L1Peer) {
+	return cli.newL1Peer(name, alias, initiator, exit)
+}
+
+// NewL1Peer is the creator
 func (cli *Client) newL1Peer(name string, alias string, initiator bool, exit bool) (p *L1Peer) {
 	var dcLabel string
 	iceFinished := false

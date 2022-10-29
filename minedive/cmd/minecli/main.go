@@ -86,10 +86,6 @@ func cmdLoop(c <-chan string) {
 							}
 						}
 					}
-					for mineClient.GetNL2Peers() < 2 {
-						mineClient.AskL2()
-						time.Sleep(3 * time.Second)
-					}
 					mineClient.Verbose = false
 				case "search":
 					lang := "en_US"
@@ -129,6 +125,17 @@ func cmdLoop(c <-chan string) {
 						cell.Type = "getk"
 						cell.D0 = cmd[1]
 						minedive.JSONSuccessSend(mineClient, cell)
+					}
+				case "getspd":
+					if len(cmd) > 1 {
+						mineClient = minedive.Dial(bootstrap)
+						mineClient.Responder = r
+						fmt.Println(b64.StdEncoding.EncodeToString(mineClient.PK[:]))
+						p := mineClient.NewL1Peer(cmd[1], "", true, false)
+						time.Sleep(3 * time.Second)
+						fmt.Println(p.SDP)
+					} else {
+						fmt.Println("no")
 					}
 				case "wsraw":
 					if cmd[1] != "" {
@@ -173,9 +180,6 @@ func cmdLoop(c <-chan string) {
 						}
 					}
 				case "list":
-					mineClient.ListL1Peers()
-					mineClient.ListL2Peers()
-				case "listip":
 					mineClient.ListL1Peers()
 				case "getpeers":
 					mineClient.SingleCmd("getpeers")

@@ -19,25 +19,81 @@ import (
 )
 
 type Client struct {
-	url       string
-	c         *websocket.Conn
-	L1Peers   map[string]*L1Peer
-	L2Peers   map[string]*L2Peer
-	Searcher  func(*Client, string, string, string, string, string) //l2, q, lang, key, nonce
-	Responder func(*Client, string)                                 //
-	pMu       *sync.RWMutex
-	pL2Mu     *sync.RWMutex
-	tid       string
-	reauth    string
-	Verbose   bool
-	PrivK     [32]byte
-	PK        [32]byte
-	Browser   bool
-	kMu       *sync.RWMutex
-	Keys      map[string][32]byte
-	Circuits  []*Circuit
-	Routes    map[string]*L1Peer
-	routeMu   *sync.RWMutex
+	url                      string
+	c                        *websocket.Conn
+	L1Peers                  map[string]*L1Peer
+	L2Peers                  map[string]*L2Peer
+	Searcher                 func(*Client, string, string, string, string, string) //l2, q, lang, key, nonce
+	Responder                func(*Client, string)                                 //
+	pMu                      *sync.RWMutex
+	pL2Mu                    *sync.RWMutex
+	tid                      string
+	reauth                   string
+	Verbose                  bool
+	PrivK                    [32]byte
+	PK                       [32]byte
+	Browser                  bool
+	kMu                      *sync.RWMutex
+	Keys                     map[string][32]byte
+	Circuits                 []*Circuit
+	Routes                   map[string]*L1Peer
+	routeMu                  *sync.RWMutex
+	opts                     *DialOptions
+	Notification             chan string
+	StateNotification        chan MinediveState
+	State                    MinediveState
+	peerConnectionNoticeChan chan peerConnEvent
+}
+
+type peerConnEvent struct {
+	state webrtc.PeerConnectionState
+	peer  string
+}
+
+func (cli *Client) peerConnectionNoticeHandler() {
+	for {
+		select {
+		case ev := <-cli.peerConnectionNoticeChan:
+			switch ev.state {
+			case webrtc.PeerConnectionStateNew:
+				log.Println("PCNH", ev.state.String(), ev.peer)
+			case webrtc.PeerConnectionStateConnected:
+				for _, c := range cli.Circuits {
+					log.Printf("PCNH TELL CIRCUIT %s PEER %s IS %s\n", c.CircuitID, ev.peer, ev.state)
+					c.CircuitEvent <- "guard-connected"
+				}
+			case webrtc.PeerConnectionStateFailed:
+				// Wait until PeerConnection has had no network activity for 30 seconds or another failure. It may be reconnected using an ICE Restart.
+				// Use webrtc.PeerConnectionStateDisconnected if you are interested in detecting faster timeout.
+				// Note that the PeerConnection may come back from PeerConnectionStateDisconnected.
+				cli.DeletePeer(ev.peer)
+				for i, c := range cli.Circuits {
+					if ev.peer == c.Guard.ID {
+						cli.Circuits[i] = nil
+						c, err := cli.NewCircuit()
+						if err != nil {
+							log.Println(err)
+						}
+						cli.Circuits[i] = c
+					}
+				}
+				//XXX delete routes
+				//XXX invalid circuits
+				fmt.Println("Peer Connection has gone to failed exiting")
+			default:
+				log.Println("PCNH", ev.state.String(), ev.peer)
+			}
+		}
+	}
+}
+
+func (cli *Client) stateHandler() {
+	for {
+		select {
+		case n := <-cli.StateNotification:
+			cli.State = n
+		}
+	}
 }
 
 func (cli *Client) CreateOffer(target string, alias string, exit bool) {
@@ -75,6 +131,7 @@ func (cli *Client) AcceptOffer(target string, sdp string) {
 func (cli *Client) AcceptAnswer(target, sdp string) {
 	//log.Println("accepting answer")
 	p, ok := cli.GetPeer(target)
+	p.SDP = sdp
 	if ok != true {
 		//log.Println("peer", target, "NOT FOUND")
 		return
@@ -95,21 +152,39 @@ func (cli *Client) AcceptAnswer(target, sdp string) {
 	return
 }
 
+func (cli *Client) WebSocketJSONDial() (*websocket.Conn, error) {
+	opts := websocket.DialOptions{}
+	opts.Subprotocols = append(opts.Subprotocols, "json")
+	c, _, err := websocket.Dial(context.Background(), cli.url, &opts)
+	return c, err
+}
+
+func (cli *Client) Redial() (err error) {
+	cli.c.Close(websocket.StatusAbnormalClosure, "")
+	cli.c, err = cli.WebSocketJSONDial()
+	if err == nil {
+		log.Printf("REDIAL: Connected[%s]\n", cli.opts.D1)
+	}
+	d0 := b64.StdEncoding.EncodeToString(cli.PK[:32])
+	in := Cell{Type: "gettid", D0: d0, D1: cli.opts.D1}
+	JSONSuccessSend(cli, in)
+
+	return err
+}
+
 func newClient(ctx context.Context, url string) (*Client, error) {
 	//transport := http.Transport{}
 	//httpClient := http.Client{Transport: &transport}
-	//opts := websocket.DialOptions{HTTPClient: &httpClient}
-	opts := websocket.DialOptions{}
-	opts.Subprotocols = append(opts.Subprotocols, "json")
-	c, _, err := websocket.Dial(ctx, url, &opts)
+	cli := &Client{
+		url: url,
+	}
+	cli.Notification = make(chan string)
+	c, err := cli.WebSocketJSONDial()
 	if err != nil {
 		return nil, err
 	}
 
-	cli := &Client{
-		url: url,
-		c:   c,
-	}
+	cli.c = c
 	cli.L1Peers = make(map[string]*L1Peer)
 	cli.L2Peers = make(map[string]*L2Peer)
 	cli.Keys = make(map[string][32]byte)
@@ -118,6 +193,10 @@ func newClient(ctx context.Context, url string) (*Client, error) {
 	cli.kMu = &sync.RWMutex{}
 	cli.Routes = make(map[string]*L1Peer) //XXX mutex?
 	cli.routeMu = &sync.RWMutex{}
+	cli.State = MinediveStateNew
+	cli.peerConnectionNoticeChan = make(chan peerConnEvent, 20) //XXX queue
+	go cli.stateHandler()
+	go cli.peerConnectionNoticeHandler()
 
 	return cli, nil
 }
@@ -167,29 +246,14 @@ func (c *Client) SearchL2(q string, lang string) {
 		Query: q,
 		Lang:  lang,
 	}
-	log.Printf("SearchL2 searching[%s]\n", q)
 	b, err := json.Marshal(m)
 	if err != nil {
 		log.Println("search", err)
+		return
 	}
-	if c.Circuits[0].State > 0 {
+	if c.Circuits[0].StateOK() {
 		c.Circuits[0].Send(string(b))
 	}
-	// if err != nil {
-	// 	log.Println("SearchL2", err)
-	// }
-	// c.pL2Mu.RLock()
-	// for _, l2 := range c.L2Peers {
-	// 	if l2.GW.dc.ReadyState() == webrtc.DataChannelStateOpen {
-	// 		c.SendL2(l2, b)
-	// 	} else {
-	// 		fmt.Println(c.tid, "GW readyState is:", l2.GW.dc.ReadyState().String())
-	// 		if l2.GW.dc.ReadyState() == webrtc.DataChannelStateClosed {
-	// 			c.DeleteL2Peer(l2.Name)
-	// 		}
-	// 	}
-	// }
-	// c.pL2Mu.RUnlock()
 }
 
 func (c *Client) GetNL2Peers() int {
@@ -494,10 +558,12 @@ func (cli *Client) ws_loop() {
 	var cancel context.CancelFunc
 
 	for {
+	RETRY:
 		ctx, cancel = context.WithTimeout(context.Background(), time.Second*300)
 		err := wsjson.Read(ctx, cli.c, &aaa)
 		//log.Println(aaa)
 		if err == nil {
+			cancel()
 			switch aaa.Type {
 			case "userlist":
 				go cli.userlistHandler(&aaa)
@@ -507,12 +573,15 @@ func (cli *Client) ws_loop() {
 				log.Println("Guard:", aaa.D0)
 				cli.Circuits[0].Guard.ID = aaa.D0
 				go cli.newL1Peer(aaa.D0, "", true, false)
+				//cli.Circuits[0].Notification <- "guard"
 			case "bridge":
 				log.Println("Bridge:", aaa.D0)
 				cli.Circuits[0].Bridge.ID = aaa.D0
+				//cli.Circuits[0].Notification <- "bridge"
 			case "exit":
 				log.Println("Exit:", aaa.D0)
 				cli.Circuits[0].Exit.ID = aaa.D0
+				//cli.Circuits[0].Notification <- "exit"
 			case "offer":
 				fmt.Printf("Offer from %s received\n", aaa.D0)
 				//fmt.Println(aaa.D2)
@@ -536,6 +605,8 @@ func (cli *Client) ws_loop() {
 					cli.kMu.Lock()
 					cli.Keys[aaa.D0] = k32
 					cli.kMu.Unlock()
+					//XXX cli.Notification <- "gotkey"
+					//cli.Circuits[0].Notification <- "gotkey"
 					//fmt.Println("new key:", b64.StdEncoding.EncodeToString(k32[:]))
 				}
 			case "key":
@@ -553,9 +624,56 @@ func (cli *Client) ws_loop() {
 			default:
 				fmt.Println(aaa.Type, "WS msg not implemented")
 			}
+		} else {
+			cancel()
+			cs := websocket.CloseStatus(err)
+			switch cs {
+			case websocket.StatusGoingAway:
+				log.Println("WS Status (GoingAway) REDIAL AGAIN")
+				time.Sleep(10 * time.Second)
+				err := cli.Redial()
+				if err != nil {
+					log.Println(err)
+				}
+				time.Sleep(10 * time.Second)
+				goto RETRY
+			case websocket.StatusAbnormalClosure:
+				log.Println("WS Status (AbnormalClosure) REDIAL AGAIN")
+				time.Sleep(10 * time.Second)
+				err := cli.Redial()
+				if err != nil {
+					log.Println(err)
+				}
+				time.Sleep(10 * time.Second)
+				goto RETRY
+			case -1:
+				log.Println("WS Status (-1) REDIAL AGAIN")
+				time.Sleep(10 * time.Second)
+				err := cli.Redial()
+				if err != nil {
+					log.Println(err)
+				}
+				time.Sleep(10 * time.Second)
+				goto RETRY
+			default:
+				log.Printf("ERR on WS READ[%v] %v\n", cs, err)
+				goto RETRY
+			}
 		}
 		cancel()
 	}
+}
+
+func (cli *Client) SinglePing() {
+	var in Cell
+	cli.SingleCmd("ping")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	err := wsjson.Write(ctx, cli.c, in)
+	if err != nil {
+		log.Println("Client Ping write failed", err)
+		//XXX fix peer
+	}
+	cancel()
 }
 
 func (cli *Client) ping() {
@@ -594,12 +712,11 @@ func (cli *Client) JCell(cell string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	err = wsjson.Write(ctx, cli.c, in)
+	cancel()
 	if err != nil {
 		log.Println("JCell Write failed", err)
-		cancel()
 		return
 	}
-	cancel()
 }
 
 func (cli *Client) SingleCmd(cmd string) {
@@ -620,6 +737,7 @@ func Dial(addr string) *Client {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	cli, err := newClient(ctx, addr)
+	cancel()
 	cli.Browser = true
 	if err != nil {
 		log.Fatal(err)
@@ -627,11 +745,13 @@ func Dial(addr string) *Client {
 	copy(cli.PrivK[:], senderPrivateKey[:32])
 	copy(cli.PK[:], senderPublicKey[:32])
 	d0 := b64.StdEncoding.EncodeToString(cli.PK[:32])
-
-	cancel()
+	cli.opts = &DialOptions{
+		D0: d0,
+		D1: "e,g",
+	}
 
 	var out Cell
-	in := Cell{Type: "gettid", D0: d0, D1: "e,g"}
+	in := Cell{Type: "gettid", D0: d0, D1: cli.opts.D1}
 	JSONSuccessExchange(cli, in, &out)
 	//log.Println(out)
 	cli.tid = out.D0
@@ -643,12 +763,23 @@ func Dial(addr string) *Client {
 	return cli
 }
 
+func DefaultDial(addr string) *Client {
+	opts := &DialOptions{
+		D1: "e,g",
+	}
+	return DialOpts(addr, opts)
+}
+
 type DialOptions struct {
 	D0              string
 	D1              string
 	PublicKey       *[32]byte
 	PrivateKey      *[32]byte
 	ClientIsBrowser bool
+}
+
+func (cli *Client) RedialOpts(add string, opts *DialOptions) {
+
 }
 
 func DialOpts(addr string, opts *DialOptions) *Client {
@@ -660,7 +791,8 @@ func DialOpts(addr string, opts *DialOptions) *Client {
 	if opts.PublicKey == nil || opts.PrivateKey == nil {
 		senderPublicKey, senderPrivateKey, err = box.GenerateKey(crand.Reader)
 		if err != nil {
-			fmt.Println("Dial: unable to generate keys")
+			//XXX wait and try again actually
+			log.Panic("Dial: unable to generate keys", err)
 		}
 	} else {
 		senderPublicKey = opts.PublicKey
@@ -668,6 +800,7 @@ func DialOpts(addr string, opts *DialOptions) *Client {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	cli, err := newClient(ctx, addr)
+	cli.opts = opts
 	cli.Browser = true
 	if err != nil {
 		log.Fatal(err)
@@ -700,6 +833,7 @@ func DialMiddle(addr string) *Client {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	cli, err := newClient(ctx, addr)
+	cancel()
 	cli.Browser = false
 	if err != nil {
 		log.Fatal(err)
@@ -707,11 +841,13 @@ func DialMiddle(addr string) *Client {
 	copy(cli.PrivK[:], senderPrivateKey[:32])
 	copy(cli.PK[:], senderPublicKey[:32])
 	d0 := b64.StdEncoding.EncodeToString(cli.PK[:32])
-
-	cancel()
+	cli.opts = &DialOptions{
+		D0: d0,
+		D1: "g,b",
+	}
 
 	var out Cell
-	in := Cell{Type: "gettid", D0: d0, D1: "g,b"}
+	in := Cell{Type: "gettid", D0: d0, D1: cli.opts.D1}
 	JSONSuccessExchange(cli, in, &out)
 	//log.Println(out)
 	cli.tid = out.D0
