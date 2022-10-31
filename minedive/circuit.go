@@ -7,11 +7,18 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"runtime"
 	"time"
 
 	"github.com/pion/webrtc/v3"
 	"golang.org/x/crypto/nacl/box"
 	"golang.org/x/crypto/nacl/secretbox"
+)
+
+const (
+	GetPeerTimeout    = 30
+	GetPeerFailureMax = 3
+	GetKeyTimeout     = 30
 )
 
 type Node struct {
@@ -25,17 +32,68 @@ type Node struct {
 }
 
 type Circuit struct {
-	CircuitID    string
-	DC           *webrtc.DataChannel
-	State        string
-	Guard        Node
-	Bridge       Node
-	Exit         Node
-	PubK         [32]byte
-	PrivK        [32]byte
-	m            *Client
-	Notification chan string
-	CircuitEvent chan string
+	CircuitID         string
+	DC                *webrtc.DataChannel
+	State             string
+	StateNotification chan string
+	Guard             Node
+	Bridge            Node
+	Exit              Node
+	PubK              [32]byte
+	PrivK             [32]byte
+	m                 *Client
+	Notification      chan string
+	CircuitEvent      chan string
+	GotKey            chan string
+}
+
+//XXX need to exit handlers
+func (c *Circuit) XXXchecker() {
+	for {
+		select {
+		case <-time.After(10 * time.Second):
+			log.Println("[XXX]", c.CircuitID, "still alive")
+		}
+	}
+}
+
+func (c *Circuit) stateHandler() {
+	for {
+		select {
+		case n := <-c.StateNotification:
+			c.State = n
+			log.Println("[SH]", n)
+		}
+	}
+}
+
+func (c *Circuit) handleNotification() {
+	for {
+		select {
+		case n := <-c.Notification:
+			log.Println("CircuitNotification:", n)
+			switch n {
+			case "gotkey":
+				c.GotKey <- n
+			default:
+				log.Println("[HN]", n)
+			}
+		}
+	}
+}
+
+func (c *Circuit) eventHandler() {
+	for {
+		select {
+		case ev := <-c.CircuitEvent:
+			switch ev {
+			//case "guard-connected":
+			//go c.ExtendBeyondGuard()
+			default:
+				log.Println("[EH]", ev)
+			}
+		}
+	}
 }
 
 //needed: nonce, e.Key
@@ -156,6 +214,16 @@ BEGIN:
 
 func (m *Client) NewCircuit() (*Circuit, error) {
 	c := &Circuit{}
+	runtime.SetFinalizer(c, func(c *Circuit) { fmt.Println(c.CircuitID, "IS DEAD XXX") })
+	c.Notification = make(chan string)
+	c.StateNotification = make(chan string)
+	c.CircuitEvent = make(chan string)
+	c.State = "New"
+	go c.stateHandler()
+	go c.eventHandler()
+	go c.handleNotification()
+	go c.XXXchecker()
+
 	publicKey, privateKey, err := box.GenerateKey(crand.Reader)
 	if err != nil {
 		fmt.Println("SetupCircuit: unable to generate keys:", err)
@@ -227,33 +295,56 @@ FAILURE:
 	return nil, errors.New("TIMEOUT")
 }
 
+func (c *Circuit) WaitGotKey(cell Cell) error {
+	JSONSuccessSend(c.m, cell)
+	select {
+	case s := <-c.GotKey:
+		log.Println("Got key", s)
+	case <-time.After(GetKeyTimeout * time.Second):
+		//XXX ask again?
+		log.Println("Timeout Guard Key")
+		return errors.New("WAIT GOT KEY FAILED")
+	}
+	return nil
+}
+
 func (c *Circuit) SetupCircuit(guard string, bridge string, exit string) {
 	o := encL1Msg{}
 	var err error
 	var cell Cell
 	cell.Type = "getk"
 	cell.D0 = guard
-	JSONSuccessSend(c.m, cell)
+	c.GotKey = make(chan string)
+	c.WaitGotKey(cell)
+	//JSONSuccessSend(c.m, cell)
 	cell.D0 = bridge
-	JSONSuccessSend(c.m, cell)
+	c.WaitGotKey(cell)
+	//JSONSuccessSend(c.m, cell)
 	cell.D0 = exit
-	JSONSuccessSend(c.m, cell)
+	c.WaitGotKey(cell)
+	//JSONSuccessSend(c.m, cell)
+	close(c.GotKey)
 
-	//LOOP this on failed
-GETKEYS:
-	time.Sleep(1 * time.Second)
-	c.m.kMu.RLock()
-	tk, ok1 := c.m.Keys[guard]
-	copy(c.Guard.OKey[:32], tk[:32])
-	tk, ok2 := c.m.Keys[bridge]
-	copy(c.Bridge.OKey[:32], tk[:32])
-	tk, ok3 := c.m.Keys[exit]
-	copy(c.Exit.OKey[:32], tk[:32])
-	c.m.kMu.RUnlock()
-	if !ok1 || !ok2 || !ok3 {
-		log.Println("Try again get keys")
-		goto GETKEYS
-	}
+	// 	//LOOP this on failed
+	// 	failed := 0
+	// GETKEYS:
+	// 	time.Sleep(1 * time.Second)
+	// 	c.m.kMu.RLock()
+	// 	tk, ok1 := c.m.Keys[guard]
+	// 	copy(c.Guard.OKey[:32], tk[:32])
+	// 	tk, ok2 := c.m.Keys[bridge]
+	// 	copy(c.Bridge.OKey[:32], tk[:32])
+	// 	tk, ok3 := c.m.Keys[exit]
+	// 	copy(c.Exit.OKey[:32], tk[:32])
+	// 	c.m.kMu.RUnlock()
+	// 	if !ok1 || !ok2 || !ok3 {
+	// 		if failed < 30 {
+	// 			failed++
+	// 			log.Println("Try again get keys")
+	// 			goto GETKEYS
+	// 		}
+	// 		return
+	// 	}
 	box.Precompute(&c.Guard.TKey, &c.Guard.OKey, &c.PrivK)
 	box.Precompute(&c.Bridge.TKey, &c.Bridge.OKey, &c.PrivK)
 	box.Precompute(&c.Exit.TKey, &c.Exit.OKey, &c.PrivK)
@@ -328,12 +419,12 @@ WAITTEST:
 	default:
 		log.Printf("Circuit %s State [%s]", c.CircuitID, c.State)
 	}
-	if failedWait < 5 {
+	if failedWait < 2 {
 		failedWait++
-		time.Sleep(1 * time.Second)
+		time.Sleep(5 * time.Second)
 		goto WAITTEST
 	}
-	if failedSend < 5 {
+	if failedSend < 2 {
 		log.Println("RESEND")
 		failedSend++
 		failedWait = 0

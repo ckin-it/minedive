@@ -35,6 +35,8 @@ type L1Peer struct {
 	c              *Client
 	gatherComplete chan struct{}
 	dataChanOpen   chan struct{}
+	ConnStateCh    chan webrtc.PeerConnectionState
+	ConnState      webrtc.PeerConnectionState
 	Exit           bool
 	K              [32]byte
 	SDP            string
@@ -276,7 +278,10 @@ func (cli *Client) handleL1Msg(p *L1Peer, msg webrtc.DataChannelMessage, encMsg 
 		cli.ReplyCircuit("{\"type\":\"test2\"}", encMsg.Key, encMsg.Nonce)
 	case "test2":
 		log.Println(cli.tid, "REPLY TEST MSG RECEIVED")
-		cli.Circuits[0].State = "OK"
+		//XXX this could be blocking cli.Circuits[0].StateNotification <- "OK"
+		cli.Circuits[0].StateNotification <- "OK" //XXX fix to map to a specific Circuit
+		log.Println(cli.tid, "REPLY TEST MSG PROPAGATED")
+		//cli.Circuits[0].State = "OK"
 	case "fwd2":
 		m := FwdMsg{}
 		json.Unmarshal(msg.Data, &m)
@@ -320,6 +325,7 @@ func (cli *Client) handleL1Msg(p *L1Peer, msg webrtc.DataChannelMessage, encMsg 
 			return
 		}
 	case "l2":
+		log.Println("L2 msg received, NEVER RIGHT?")
 		var m L2L1Msg
 		var askKey bool
 		err := json.Unmarshal(msg.Data, &m)
@@ -338,11 +344,12 @@ func (cli *Client) handleL1Msg(p *L1Peer, msg webrtc.DataChannelMessage, encMsg 
 	}
 }
 
+// Exporting newL1Peer
 func (cli *Client) NewL1Peer(name string, alias string, initiator bool, exit bool) (p *L1Peer) {
 	return cli.newL1Peer(name, alias, initiator, exit)
 }
 
-// NewL1Peer is the creator
+// newL1Peer is the creator
 func (cli *Client) newL1Peer(name string, alias string, initiator bool, exit bool) (p *L1Peer) {
 	var dcLabel string
 	iceFinished := false
@@ -358,6 +365,7 @@ func (cli *Client) newL1Peer(name string, alias string, initiator bool, exit boo
 	}
 	p.gatherComplete = make(chan struct{})
 	p.dataChanOpen = make(chan struct{})
+	p.ConnStateCh = make(chan webrtc.PeerConnectionState)
 
 	//_true := true
 	_true := false
@@ -404,6 +412,12 @@ func (cli *Client) newL1Peer(name string, alias string, initiator bool, exit boo
 	// Register channel opening handling
 	dc.OnOpen(func() {
 		//log.Println("Data channel ", dc.Label(), dc.ID(), "open. DO SOMETHING")
+		//XXX THIS WILL NOTIFY the client
+		//ev := peerConnEvent{}
+		//ev.state = webrtc.PeerConnectionStateConnected
+		//ev.peer = p.Name
+		//cli.peerConnectionNoticeChan <- ev
+
 		dc.OnClose(func() {
 			fmt.Println("DC closed with", p.Name)
 			delete(cli.L1Peers, p.Name)
@@ -419,6 +433,14 @@ func (cli *Client) newL1Peer(name string, alias string, initiator bool, exit boo
 
 	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
 		//fmt.Printf("%s PC State has changed: %s\n", p.Name, s.String())
+		//XXX more granular notification
+		//ev := peerConnEvent{}
+		//ev.state = s
+		//ev.peer = p.Name
+		//if s != webrtc.PeerConnectionStateConnected {
+		//	cli.peerConnectionNoticeChan <- ev
+		//}
+		//p.ConnState = s
 
 		if s == webrtc.PeerConnectionStateFailed {
 			// Wait until PeerConnection has had no network activity for 30 seconds or another failure. It may be reconnected using an ICE Restart.
@@ -464,6 +486,7 @@ func (cli *Client) newL1Peer(name string, alias string, initiator bool, exit boo
 	}
 	p.pc = pc
 	cli.AddPeer(p)
+	//XXX cli.Notification <- "new-peer" why notify client when addPeer has been invoked by it?
 
 	return p
 }

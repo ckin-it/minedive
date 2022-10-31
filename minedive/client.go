@@ -131,11 +131,11 @@ func (cli *Client) AcceptOffer(target string, sdp string) {
 func (cli *Client) AcceptAnswer(target, sdp string) {
 	//log.Println("accepting answer")
 	p, ok := cli.GetPeer(target)
-	p.SDP = sdp
 	if ok != true {
 		//log.Println("peer", target, "NOT FOUND")
 		return
 	}
+	p.SDP = sdp
 	if p.pc.SignalingState() == webrtc.SignalingStateHaveLocalOffer {
 		desc := webrtc.SessionDescription{}
 		desc.SDP = sdp
@@ -605,6 +605,11 @@ func (cli *Client) ws_loop() {
 					cli.kMu.Lock()
 					cli.Keys[aaa.D0] = k32
 					cli.kMu.Unlock()
+					for _, c := range cli.Circuits {
+						if c.Guard.ID == aaa.D0 || c.Exit.ID == aaa.D0 || c.Bridge.ID == aaa.D0 {
+							c.Notification <- "gotkey"
+						}
+					}
 					//XXX cli.Notification <- "gotkey"
 					//cli.Circuits[0].Notification <- "gotkey"
 					//fmt.Println("new key:", b64.StdEncoding.EncodeToString(k32[:]))
