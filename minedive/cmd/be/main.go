@@ -50,17 +50,6 @@ func ReplyL2(this js.Value, args []js.Value) interface{} {
 	//log.Println("Invoke ReplayCircuit with CircuitID", key)
 	m.ReplyCircuit(string(b), key, nonce)
 	return nil
-	// p, ok := m.GetL2PeerIfExists(name.String())
-	// if !ok {
-	// 	fmt.Println(name.String(), "do not exist")
-	// 	return nil
-	// }
-	// b, err := json.Marshal(msg)
-	// if err != nil {
-	// 	log.Println("ReplyL2 WASM:", err)
-	// }
-	// err = m.SendL2(p, b)
-	//return err
 }
 
 var jsSearch js.Value
@@ -117,18 +106,12 @@ func MinediveConnect(bootstrap string, nL1 int, nL2 int) {
 	time.Sleep(1 * time.Second)
 
 	go m.KeepAlive(30 * time.Second)
-
-	// go func() {
-	// 	for m.GetNPeers() < nL1 {
-	// 		m.SingleCmd("getpeers")
-	// 		time.Sleep(3 * time.Second)
-	// 	}
-	// 	for m.GetNL2Peers() < nL2 {
-	// 		m.AskL2()
-	// 		time.Sleep(3 * time.Second)
-	// 	}
-	// }()
 	select {}
+}
+
+func TestWS(this js.Value, args []js.Value) interface{} {
+	m.SingleCmd("ping")
+	return nil
 }
 
 func ExportedMinediveConnect(this js.Value, args []js.Value) interface{} {
@@ -160,6 +143,7 @@ func ExportedMinediveReConnect(this js.Value, args []js.Value) interface{} {
 	_ = n
 	log.Println("MinediveReConnect invoked with", bootstrap, "[not implemented yet]")
 	//go MinediveConnect(bootstrap, n)
+	go MinediveConnect(bootstrap, n, 999)
 	return nil
 }
 
@@ -173,11 +157,13 @@ func ExportedMinediveSearch(this js.Value, args []js.Value) interface{} {
 	return nil
 }
 
-func ExportedMinediveGetNL1(this js.Value, args []js.Value) interface{} {
+func ExportedMinediveGetState(this js.Value, args []js.Value) interface{} {
 	//return js.ValueOf(m.GetNPeers()) //XXX fix this
-	return js.ValueOf(m.GetNPeers())
+	return js.ValueOf(m.State.String())
 }
-func ExportedMinediveGetNL2(this js.Value, args []js.Value) interface{} {
+
+func ExportedMinediveGetCircuitState(this js.Value, args []js.Value) interface{} {
+	//return js.ValueOf(m.Circuits[0].State.String())
 	return js.ValueOf(m.Circuits[0].State)
 }
 
@@ -188,8 +174,9 @@ func main() {
 	js.Global().Set("MinediveNewCircuit", js.FuncOf(ExportedMinediveNewCircuit))
 	js.Global().Set("MinediveReConnect", js.FuncOf(ExportedMinediveReConnect))
 	js.Global().Set("MinediveSearch", js.FuncOf(ExportedMinediveSearch))
-	js.Global().Set("MinediveGetNL1", js.FuncOf(ExportedMinediveGetNL1))
-	js.Global().Set("MinediveGetNL2", js.FuncOf(ExportedMinediveGetNL2))
+	js.Global().Set("MinediveGetCircuitState", js.FuncOf(ExportedMinediveGetCircuitState))
+	js.Global().Set("MinediveGetState", js.FuncOf(ExportedMinediveGetState))
+	js.Global().Set("TestWS", js.FuncOf(TestWS))
 	//XXX register multiple
 	jsSearch = js.Global().Get("search")
 	jsRespond = js.Global().Get("respond")
