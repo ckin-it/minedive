@@ -164,7 +164,7 @@ func ExportedMinediveGetState(this js.Value, args []js.Value) interface{} {
 
 func ExportedMinediveGetCircuitState(this js.Value, args []js.Value) interface{} {
 	//return js.ValueOf(m.Circuits[0].State.String())
-	return js.ValueOf(m.Circuits[0].State)
+	return js.ValueOf(m.Circuits[0].State())
 }
 
 func main() {

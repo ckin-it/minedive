@@ -213,6 +213,7 @@ func (cli *Client) handleL1Msg(p *L1Peer, msg webrtc.DataChannelMessage, encMsg 
 			log.Println("Responder not implemented")
 		}
 	case "connect":
+		log.Println("CONNECT RECEIVED")
 		m := FwdMsg{}
 		json.Unmarshal(msg.Data, &m)
 		_, ok := cli.GetPeer(m.To)
@@ -279,7 +280,7 @@ func (cli *Client) handleL1Msg(p *L1Peer, msg webrtc.DataChannelMessage, encMsg 
 	case "test2":
 		log.Println(cli.tid, "REPLY TEST MSG RECEIVED")
 		//XXX this could be blocking cli.Circuits[0].StateNotification <- "OK"
-		cli.Circuits[0].StateNotification <- "OK" //XXX fix to map to a specific Circuit
+		cli.Circuits[0].Notification <- "TEST-OK" //XXX fix to map to a specific Circuit
 		log.Println(cli.tid, "REPLY TEST MSG PROPAGATED")
 		//cli.Circuits[0].State = "OK"
 	case "fwd2":
@@ -351,6 +352,7 @@ func (cli *Client) NewL1Peer(name string, alias string, initiator bool, exit boo
 
 // newL1Peer is the creator
 func (cli *Client) newL1Peer(name string, alias string, initiator bool, exit bool) (p *L1Peer) {
+	log.Println("NEW PEER", name)
 	var dcLabel string
 	iceFinished := false
 	p = new(L1Peer)
@@ -411,12 +413,15 @@ func (cli *Client) newL1Peer(name string, alias string, initiator bool, exit boo
 	p.dc = dc
 	// Register channel opening handling
 	dc.OnOpen(func() {
-		//log.Println("Data channel ", dc.Label(), dc.ID(), "open. DO SOMETHING")
 		//XXX THIS WILL NOTIFY the client
-		//ev := peerConnEvent{}
-		//ev.state = webrtc.PeerConnectionStateConnected
-		//ev.peer = p.Name
-		//cli.peerConnectionNoticeChan <- ev
+		ev := peerConnEvent{}
+		ev.state = webrtc.PeerConnectionStateConnected
+		ev.peer = p.Name
+		for _, c := range cli.Circuits {
+			if c.Guard.ID == ev.peer {
+				c.Notification <- "guard-connected"
+			}
+		}
 
 		dc.OnClose(func() {
 			fmt.Println("DC closed with", p.Name)

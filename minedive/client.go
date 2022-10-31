@@ -50,43 +50,6 @@ type peerConnEvent struct {
 	peer  string
 }
 
-func (cli *Client) peerConnectionNoticeHandler() {
-	for {
-		select {
-		case ev := <-cli.peerConnectionNoticeChan:
-			switch ev.state {
-			case webrtc.PeerConnectionStateNew:
-				log.Println("PCNH", ev.state.String(), ev.peer)
-			case webrtc.PeerConnectionStateConnected:
-				for _, c := range cli.Circuits {
-					log.Printf("PCNH TELL CIRCUIT %s PEER %s IS %s\n", c.CircuitID, ev.peer, ev.state)
-					c.CircuitEvent <- "guard-connected"
-				}
-			case webrtc.PeerConnectionStateFailed:
-				// Wait until PeerConnection has had no network activity for 30 seconds or another failure. It may be reconnected using an ICE Restart.
-				// Use webrtc.PeerConnectionStateDisconnected if you are interested in detecting faster timeout.
-				// Note that the PeerConnection may come back from PeerConnectionStateDisconnected.
-				cli.DeletePeer(ev.peer)
-				for i, c := range cli.Circuits {
-					if ev.peer == c.Guard.ID {
-						cli.Circuits[i] = nil
-						c, err := cli.NewCircuit()
-						if err != nil {
-							log.Println(err)
-						}
-						cli.Circuits[i] = c
-					}
-				}
-				//XXX delete routes
-				//XXX invalid circuits
-				fmt.Println("Peer Connection has gone to failed exiting")
-			default:
-				log.Println("PCNH", ev.state.String(), ev.peer)
-			}
-		}
-	}
-}
-
 func (cli *Client) stateHandler() {
 	for {
 		select {
@@ -194,9 +157,7 @@ func newClient(ctx context.Context, url string) (*Client, error) {
 	cli.Routes = make(map[string]*L1Peer) //XXX mutex?
 	cli.routeMu = &sync.RWMutex{}
 	cli.State = MinediveStateNew
-	cli.peerConnectionNoticeChan = make(chan peerConnEvent, 20) //XXX queue
 	go cli.stateHandler()
-	go cli.peerConnectionNoticeHandler()
 
 	return cli, nil
 }
@@ -571,32 +532,36 @@ func (cli *Client) ws_loop() {
 			//log.Println("pong")
 			case "guard": //receiving a guard peer?
 				log.Println("Guard:", aaa.D0)
-				cli.Circuits[0].Guard.ID = aaa.D0
 				go cli.newL1Peer(aaa.D0, "", true, false)
-				//cli.Circuits[0].Notification <- "guard"
+				for _, c := range cli.Circuits {
+					if c.Guard.ID == "" {
+						c.Guard.ID = aaa.D0
+						c.Notification <- "gotguard"
+					}
+				}
 			case "bridge":
 				log.Println("Bridge:", aaa.D0)
-				cli.Circuits[0].Bridge.ID = aaa.D0
-				//cli.Circuits[0].Notification <- "bridge"
+				for _, c := range cli.Circuits {
+					if c.Bridge.ID == "" {
+						c.Bridge.ID = aaa.D0
+						c.Notification <- "gotbridge"
+					}
+				}
 			case "exit":
 				log.Println("Exit:", aaa.D0)
-				cli.Circuits[0].Exit.ID = aaa.D0
-				//cli.Circuits[0].Notification <- "exit"
+				for _, c := range cli.Circuits {
+					if c.Exit.ID == "" {
+						c.Exit.ID = aaa.D0
+						c.Notification <- "gotexit"
+					}
+				}
 			case "offer":
 				fmt.Printf("Offer from %s received\n", aaa.D0)
-				//fmt.Println(aaa.D2)
 				//D0 target D1 D2 sdp
 				go cli.AcceptOffer(aaa.D0, aaa.D2)
-				//log.Println(p.pc)
-				//log.Println(p.dc)
-				//log.Println("p.dc.ReadyState:", p.dc.ReadyState().String())
 			case "answer":
 				fmt.Printf("Answer from %s received\n", aaa.D0)
-				//fmt.Println(aaa.D2)
 				go cli.AcceptAnswer(aaa.D0, aaa.D2)
-				//log.Println(p.pc)
-				//log.Println(p.dc)
-				//log.Println("p.dc.ReadyState:", p.dc.ReadyState().String())
 			case "k":
 				k, err := b64.StdEncoding.DecodeString(aaa.D1)
 				if err == nil {
@@ -610,9 +575,6 @@ func (cli *Client) ws_loop() {
 							c.Notification <- "gotkey"
 						}
 					}
-					//XXX cli.Notification <- "gotkey"
-					//cli.Circuits[0].Notification <- "gotkey"
-					//fmt.Println("new key:", b64.StdEncoding.EncodeToString(k32[:]))
 				}
 			case "key":
 				l2, _ := cli.GetL2Peer(aaa.D0, nil, false)

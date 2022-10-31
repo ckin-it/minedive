@@ -4,7 +4,6 @@ import (
 	crand "crypto/rand"
 	b64 "encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"runtime"
@@ -16,9 +15,10 @@ import (
 )
 
 const (
-	GetPeerTimeout    = 30
-	GetPeerFailureMax = 3
-	GetKeyTimeout     = 30
+	GetPeerTimeout      = 30
+	GetPeerFailureMax   = 3
+	GetKeyTimeout       = 30
+	NotificationTimeout = 30
 )
 
 type Node struct {
@@ -32,65 +32,71 @@ type Node struct {
 }
 
 type Circuit struct {
-	CircuitID         string
-	DC                *webrtc.DataChannel
-	State             string
-	StateNotification chan string
-	Guard             Node
-	Bridge            Node
-	Exit              Node
-	PubK              [32]byte
-	PrivK             [32]byte
-	m                 *Client
-	Notification      chan string
-	CircuitEvent      chan string
-	GotKey            chan string
-}
-
-//XXX need to exit handlers
-func (c *Circuit) XXXchecker() {
-	for {
-		select {
-		case <-time.After(10 * time.Second):
-			log.Println("[XXX]", c.CircuitID, "still alive")
-		}
-	}
-}
-
-func (c *Circuit) stateHandler() {
-	for {
-		select {
-		case n := <-c.StateNotification:
-			c.State = n
-			log.Println("[SH]", n)
-		}
-	}
+	CircuitID    string
+	DC           *webrtc.DataChannel
+	state        string
+	Guard        Node
+	Bridge       Node
+	Exit         Node
+	PubK         [32]byte
+	PrivK        [32]byte
+	m            *Client
+	Notification chan string
 }
 
 func (c *Circuit) handleNotification() {
 	for {
 		select {
 		case n := <-c.Notification:
-			log.Println("CircuitNotification:", n)
+			log.Printf("XXX [HN] circuit %s (%s) %s\n", c.CircuitID, c.state, n)
 			switch n {
+			case "gotexit":
+				go c.SetupStep1()
+			case "gotguard":
+				go c.SetupStep2()
+			case "gotbridge":
+				c.SetupStepGetKeys()
 			case "gotkey":
-				c.GotKey <- n
+				ok := c.CheckKeys()
+				if ok {
+					if c.state == "guard-connected" {
+						go c.ExtendCircuit()
+						c.state = "extending"
+					} else {
+						c.state = "gotallkeys"
+					}
+				}
+			case "guard-connected":
+				log.Printf("[HN] circuit %s (%s) GUARD CONNECTED\n", c.CircuitID, c.state)
+				p, ok := c.m.GetPeer(c.Guard.ID)
+				if ok {
+					c.DC = p.dc
+					if c.state == "gotallkeys" {
+						go c.ExtendCircuit()
+						c.state = "extending"
+					} else {
+						c.state = "guard-connected"
+					}
+				} else {
+					log.Println("[HN] unexplicable peer not available but connected")
+				}
+			case "quit":
+				log.Printf("[HN] circuit %s (%s) EXITING\n", c.CircuitID, c.state)
+				return
+			case "TEST-OK":
+				c.state = "OK"
+				log.Printf("[HN] circuit %s (%s) THIS COMPLEX HANDLER COULD EXIT AND LET PLACE TO A FAILURE HANDLER\n", c.CircuitID, c.state)
 			default:
 				log.Println("[HN]", n)
 			}
-		}
-	}
-}
-
-func (c *Circuit) eventHandler() {
-	for {
-		select {
-		case ev := <-c.CircuitEvent:
-			switch ev {
-			//case "guard-connected":
-			//go c.ExtendBeyondGuard()
+		case <-time.After(NotificationTimeout * time.Second):
+			switch c.state {
+			case "OK":
+				log.Printf("[HN] circuit %s (%s) KEEP-ALIVE\n", c.CircuitID, c.state)
+				//XXX nothing to do
 			default:
-				log.Println("[EH]", ev)
+				c.Send("{\"type\":\"test\"}")
+				log.Printf("[HN] circuit %s TIMEOUT: handle state (%s)\n", c.CircuitID, c.state)
 			}
 		}
 	}
@@ -216,13 +222,8 @@ func (m *Client) NewCircuit() (*Circuit, error) {
 	c := &Circuit{}
 	runtime.SetFinalizer(c, func(c *Circuit) { fmt.Println(c.CircuitID, "IS DEAD XXX") })
 	c.Notification = make(chan string)
-	c.StateNotification = make(chan string)
-	c.CircuitEvent = make(chan string)
-	c.State = "New"
-	go c.stateHandler()
-	go c.eventHandler()
+	c.state = "New"
 	go c.handleNotification()
-	go c.XXXchecker()
 
 	publicKey, privateKey, err := box.GenerateKey(crand.Reader)
 	if err != nil {
@@ -245,67 +246,50 @@ func (m *Client) NewCircuit() (*Circuit, error) {
 	var cell Cell
 	cell.Type = "getexit"
 	JSONSuccessSend(c.m, cell)
-	failed := 0
-WAIT_EXIT:
-	if c.Exit.ID == "" {
-		if failed > 10 {
-			goto FAILURE
-		}
-		failed++
-		time.Sleep(1 * time.Second)
-		fmt.Println("wait exit")
-		//XXX counter and resend
-		goto WAIT_EXIT
-	}
+	return c, nil
+}
+
+func (c *Circuit) SetupStep1() {
+	var cell Cell
 	cell.Type = "getguard"
 	cell.D0 = c.Exit.ID
 	JSONSuccessSend(c.m, cell)
-	failed = 0
-WAIT_GUARD:
-	if c.Guard.ID == "" {
-		if failed > 10 {
-			goto FAILURE
-		}
-		failed++
-		time.Sleep(1 * time.Second)
-		fmt.Println("wait guard")
-		//XXX counter and resend
-		goto WAIT_GUARD
-	}
+}
+
+func (c *Circuit) SetupStep2() {
+	var cell Cell
 	cell.Type = "getbridge"
 	cell.D0 = fmt.Sprintf("%s,%s", c.Guard.ID, c.Exit.ID)
 	JSONSuccessSend(c.m, cell)
-	failed = 0
-WAIT_BRIDGE:
-	if c.Bridge.ID == "" {
-		if failed > 10 {
-			goto FAILURE
-		}
-		failed++
-		time.Sleep(1 * time.Second)
-		fmt.Println("wait bridge")
-		//XXX counter and resend
-		goto WAIT_BRIDGE
-	}
-	fmt.Printf("setup Circuit %s\n", c.CircuitID)
-	c.SetupCircuit(c.Guard.ID, c.Bridge.ID, c.Exit.ID)
-
-	return c, nil
-FAILURE:
-	return nil, errors.New("TIMEOUT")
 }
 
-func (c *Circuit) WaitGotKey(cell Cell) error {
+func (c *Circuit) SetupStepGetKeys() {
+	var cell Cell
+	cell.Type = "getk"
+	cell.D0 = c.Guard.ID
 	JSONSuccessSend(c.m, cell)
-	select {
-	case s := <-c.GotKey:
-		log.Println("Got key", s)
-	case <-time.After(GetKeyTimeout * time.Second):
-		//XXX ask again?
-		log.Println("Timeout Guard Key")
-		return errors.New("WAIT GOT KEY FAILED")
+	cell.D0 = c.Bridge.ID
+	JSONSuccessSend(c.m, cell)
+	cell.D0 = c.Exit.ID
+	JSONSuccessSend(c.m, cell)
+}
+
+func (c *Circuit) CheckKeys() bool {
+	c.m.kMu.RLock()
+	tk1, ok1 := c.m.Keys[c.Guard.ID]
+	tk2, ok2 := c.m.Keys[c.Bridge.ID]
+	tk3, ok3 := c.m.Keys[c.Exit.ID]
+	c.m.kMu.RUnlock()
+	if !ok1 || !ok2 || !ok3 {
+		return false
 	}
-	return nil
+	copy(c.Guard.OKey[:32], tk1[:32])
+	copy(c.Bridge.OKey[:32], tk2[:32])
+	copy(c.Exit.OKey[:32], tk3[:32])
+	box.Precompute(&c.Guard.TKey, &c.Guard.OKey, &c.PrivK)
+	box.Precompute(&c.Bridge.TKey, &c.Bridge.OKey, &c.PrivK)
+	box.Precompute(&c.Exit.TKey, &c.Exit.OKey, &c.PrivK)
+	return true
 }
 
 func (c *Circuit) SetupCircuit(guard string, bridge string, exit string) {
@@ -314,16 +298,11 @@ func (c *Circuit) SetupCircuit(guard string, bridge string, exit string) {
 	var cell Cell
 	cell.Type = "getk"
 	cell.D0 = guard
-	c.GotKey = make(chan string)
-	c.WaitGotKey(cell)
-	//JSONSuccessSend(c.m, cell)
+	JSONSuccessSend(c.m, cell)
 	cell.D0 = bridge
-	c.WaitGotKey(cell)
-	//JSONSuccessSend(c.m, cell)
+	JSONSuccessSend(c.m, cell)
 	cell.D0 = exit
-	c.WaitGotKey(cell)
-	//JSONSuccessSend(c.m, cell)
-	close(c.GotKey)
+	JSONSuccessSend(c.m, cell)
 
 	// 	//LOOP this on failed
 	// 	failed := 0
@@ -411,13 +390,12 @@ SENDTEST:
 	c.Send("{\"type\":\"test\"}")
 	time.Sleep(1 * time.Second)
 WAITTEST:
-	log.Println(c.State)
-	switch c.State {
+	switch c.state {
 	case "OK":
 		log.Println("OK CIRCUIT")
 		return
 	default:
-		log.Printf("Circuit %s State [%s]", c.CircuitID, c.State)
+		log.Printf("Circuit %s State [%s]", c.CircuitID, c.state)
 	}
 	if failedWait < 2 {
 		failedWait++
@@ -431,6 +409,84 @@ WAITTEST:
 		goto SENDTEST
 	}
 
+}
+
+func (c *Circuit) ExtendCircuit() {
+	var o encL1Msg
+	var err error
+
+	log.Printf("EXTEND CIRCUIT TO BRIDGE[%s]\n", c.Bridge.ID)
+	m1 := fmt.Sprintf("{\"type\":\"connect\",\"to\":\"%s\"}", c.Bridge.ID)
+	o.Type = "enc"
+	o.Key = b64.StdEncoding.EncodeToString(c.PubK[:])
+	log.Println("circuit key:", o.Key)
+	o.TPK = b64.StdEncoding.EncodeToString(c.Guard.OKey[:])
+	o.Nonce, err = UseNonce(c.Guard.Nonce[:])
+	encmsg := secretbox.Seal(nil, []byte(m1), &c.Guard.Nonce, &c.Guard.TKey)
+	o.CT = b64.StdEncoding.EncodeToString(encmsg[:])
+	b, err := json.Marshal(o)
+	if err != nil {
+		log.Println("setupCircuit, Marshal:", err)
+		return
+	}
+	c.DC.SendText(string(b))
+
+	time.Sleep(10 * time.Second)
+	log.Printf("EXTEND CIRCUIT TO EXIT[%s]\n", c.Exit.ID)
+	m1 = fmt.Sprintf("{\"type\":\"connect\",\"to\":\"%s\"}", c.Exit.ID)
+	o.Type = "enc"
+	o.Key = b64.StdEncoding.EncodeToString(c.PubK[:])
+	o.TPK = b64.StdEncoding.EncodeToString(c.Bridge.OKey[:])
+	o.Nonce, err = UseNonce(c.Bridge.Nonce[:])
+	encmsg = secretbox.Seal(nil, []byte(m1), &c.Bridge.Nonce, &c.Bridge.TKey)
+	o.CT = b64.StdEncoding.EncodeToString(encmsg[:])
+	b, err = json.Marshal(o)
+	fm := &FwdMsg{
+		Type: "fwd2",
+		To:   c.Bridge.ID,
+		Ori:  b64.StdEncoding.EncodeToString(b),
+	}
+	b, err = json.Marshal(fm)
+	m1 = string(b)
+	o.Type = "enc"
+	o.Key = b64.StdEncoding.EncodeToString(c.PubK[:])
+	o.TPK = b64.StdEncoding.EncodeToString(c.Guard.OKey[:])
+	o.Nonce, err = UseNonce(c.Guard.Nonce[:24])
+	encmsg = secretbox.Seal(nil, []byte(m1), &c.Guard.Nonce, &c.Guard.TKey)
+	o.CT = b64.StdEncoding.EncodeToString(encmsg[:])
+	b, err = json.Marshal(o)
+	if err != nil {
+		log.Println("setupCircuit, Marshal:", err)
+		return
+	}
+	c.DC.SendText(string(b))
+	//guardPeer.Msg(string(b))
+
+	failedWait := 0
+	failedSend := 0
+	time.Sleep(1 * time.Second) //XXX
+SENDTEST:
+	c.Send("{\"type\":\"test\"}")
+	time.Sleep(1 * time.Second)
+WAITTEST:
+	switch c.state {
+	case "OK":
+		log.Println("OK CIRCUIT")
+		return
+	default:
+		log.Printf("Circuit %s State [%s]", c.CircuitID, c.state)
+	}
+	if failedWait < 2 {
+		failedWait++
+		time.Sleep(5 * time.Second)
+		goto WAITTEST
+	}
+	if failedSend < 2 {
+		log.Println("RESEND")
+		failedSend++
+		failedWait = 0
+		goto SENDTEST
+	}
 }
 
 func (m *Client) BuildCircuitZ() (c *Circuit) {
@@ -476,8 +532,12 @@ FIND_EXIT:
 	return c
 }
 
-func (m *Circuit) StateOK() bool {
-	if m.State == "OK" {
+func (c *Circuit) State() string {
+	return c.state
+}
+
+func (c *Circuit) StateOK() bool {
+	if c.state == "OK" {
 		return true
 	}
 	return false
